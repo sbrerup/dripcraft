@@ -78,6 +78,9 @@ A restart announces itself in chat, then waits 60 seconds before stopping, so
 players are not dropped without warning. Merging a change that restarts the server
 therefore takes about a minute longer.
 
+During the test phase, every player can use `/gamemode`, through
+`/data/permissions.yml` on the data volume. That file is deliberately not in Git.
+
 ## Grief log
 
 Prism records who placed, broke or took what, from the moment it is installed, in
@@ -93,11 +96,18 @@ weeks. Players never see it. An operator uses it in game:
 
 The world lives in the folder named by `LEVEL` in `manifests/minecraft.yaml`.
 
-1. In a pull request, change `LEVEL` to a new name, such as `dripcraft`, and merge
+1. Delete the test phase's `/data/permissions.yml`, or every player keeps `/gamemode`
+   in the real world:
+
+   ```bash
+   kubectl -n dripcraft-public exec minecraft-0 -c minecraft -- rm /data/permissions.yml
+   ```
+
+2. In a pull request, change `LEVEL` to a new name, such as `dripcraft`, and merge
    it. The server restarts and creates a fresh world there. The whitelist, operators
    and server settings are outside the world folder, so they carry over. Inventories,
    advancements and game rules are inside it, so they start over.
-2. Pre-generate the new world, so exploring does not make the server create terrain
+3. Pre-generate the new world, so exploring does not make the server create terrain
    during play:
 
    ```bash
@@ -108,8 +118,8 @@ The world lives in the folder named by `LEVEL` in `manifests/minecraft.yaml`.
    restarts. The defaults (`OVERWORLD_RADIUS` 5000, `NETHER_RADIUS` and `END_RADIUS`
    2500) take about 3 hours at the rate measured here. Players can join while it runs.
    See how far it is with `rcon-cli chunky progress`.
-3. Set any game rules again.
-4. The old world stays on disk, and in the backups, until you delete its folder.
+4. Set any game rules again.
+5. The old world stays on disk, and in the backups, until you delete its folder.
 
 ## Test night
 

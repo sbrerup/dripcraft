@@ -1,0 +1,23 @@
+{
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+  extends: [
+    'config:recommended',
+    'docker:pinDigests',
+    ':dependencyDashboard',
+    'schedule:weekly',
+  ],
+  timezone: 'Europe/Copenhagen',
+  // Argo CD deploys main automatically, so every update is a reviewed PR.
+  automerge: false,
+  prConcurrentLimit: 5,
+  kubernetes: {
+    managerFilePatterns: ['/^manifests/.+\.ya?ml$/'],
+  },
+  packageRules: [
+    {
+      description: 'Major updates wait for approval on the Dependency Dashboard',
+      matchUpdateTypes: ['major'],
+      dependencyDashboardApproval: true,
+    },
+  ],
+}

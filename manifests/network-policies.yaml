@@ -1,0 +1,117 @@
+# The tunnel's origin is set in the playit dashboard, so the agent could be
+# pointed anywhere it can reach, and the server takes connections from the
+# internet. Neither pod may reach the LAN, the tailnet or the rest of the
+# cluster. IPv6 egress is denied entirely.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: minecraft-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: minecraft
+  policyTypes: [Ingress]
+  ingress:
+    # Game port only. RCON stays on the pod's loopback.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: playit-agent
+      ports:
+        - {protocol: TCP, port: 25565}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: minecraft-egress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: minecraft
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    # Mojang authentication and Paper/plugin downloads: HTTPS only.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 0.0.0.0/8
+              - 10.0.0.0/8
+              - 100.64.0.0/10
+              - 127.0.0.0/8
+              - 169.254.0.0/16
+              - 172.16.0.0/12
+              - 192.0.0.0/24
+              - 192.0.2.0/24
+              - 192.168.0.0/16
+              - 198.18.0.0/15
+              - 198.51.100.0/24
+              - 203.0.113.0/24
+              - 224.0.0.0/4
+              - 240.0.0.0/4
+      ports:
+        - {protocol: TCP, port: 443}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: playit-agent-egress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: playit-agent
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: minecraft
+      ports:
+        - {protocol: TCP, port: 25565}
+    # playit's API and tunnel servers, over TCP and UDP on ports it chooses.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 0.0.0.0/8
+              - 10.0.0.0/8
+              - 100.64.0.0/10
+              - 127.0.0.0/8
+              - 169.254.0.0/16
+              - 172.16.0.0/12
+              - 192.0.0.0/24
+              - 192.0.2.0/24
+              - 192.168.0.0/16
+              - 198.18.0.0/15
+              - 198.51.100.0/24
+              - 203.0.113.0/24
+              - 224.0.0.0/4
+              - 240.0.0.0/4

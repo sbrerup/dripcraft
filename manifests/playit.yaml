@@ -1,0 +1,66 @@
+# Opens an outbound tunnel to playit.gg, so nothing on the home network or the
+# tailnet is exposed. The key lives only in the cluster (see README).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: playit-agent
+  labels:
+    app.kubernetes.io/name: playit-agent
+spec:
+  replicas: 1
+  # One agent per key: never run the old and new pod side by side.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: playit-agent
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: playit-agent
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: agent
+          image: ghcr.io/playit-cloud/playit-agent:1.2@sha256:602c70efcb0ded80aa7e92209974304cf9d1d7d435d968cf9b34f34696052ec7
+          imagePullPolicy: IfNotPresent
+          # The default socket directory does not exist for a non-root user.
+          args: ["--socket-path", "/tmp/playit.sock"]
+          env:
+            - name: SECRET_KEY_FILE
+              value: /run/secrets/playit/secret-key
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: "1"
+              memory: 256Mi
+          volumeMounts:
+            - name: secret
+              mountPath: /run/secrets/playit
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: secret
+          secret:
+            secretName: playit-agent
+            defaultMode: 0440
+        - name: tmp
+          emptyDir:
+            sizeLimit: 16Mi

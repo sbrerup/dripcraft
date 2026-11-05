@@ -1,0 +1,27 @@
+{
+  "patches": [
+    {
+      "file": "/data/spigot.yml",
+      "ops": [
+        {
+          "$set": {
+            "path": "$['world-settings']['default']['mob-spawn-range']",
+            "value": 6,
+            "value-type": "int"
+          }
+        }
+      ]
+    },
+    {
+      "file": "/data/config/paper-world-defaults.yml",
+      "ops": [
+        {
+          "$set": {
+            "path": "$['misc']['redstone-implementation']",
+            "value": "ALTERNATE_CURRENT"
+          }
+        }
+      ]
+    }
+  ]
+}

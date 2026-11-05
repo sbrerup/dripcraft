@@ -5,6 +5,7 @@ resources:
 - namespace.yaml
 - minecraft.yaml
 - playit.yaml
+- uptime-check.yaml
 - network-policies.yaml
 configMapGenerator:
 - name: paper-config

@@ -20,6 +20,65 @@
             "path": "$['misc']['redstone-implementation']",
             "value": "ALTERNATE_CURRENT"
           }
+        },
+        {
+          "$set": {
+            "path": "$['anticheat']['anti-xray']['enabled']",
+            "value": true,
+            "value-type": "bool"
+          }
+        },
+        {
+          "$set": {
+            "path": "$['anticheat']['anti-xray']['hidden-blocks']",
+            "value": [
+              "copper_ore",
+              "deepslate_copper_ore",
+              "raw_copper_block",
+              "gold_ore",
+              "deepslate_gold_ore",
+              "iron_ore",
+              "deepslate_iron_ore",
+              "raw_iron_block",
+              "coal_ore",
+              "deepslate_coal_ore",
+              "lapis_ore",
+              "deepslate_lapis_ore",
+              "mossy_cobblestone",
+              "obsidian",
+              "chest",
+              "diamond_ore",
+              "deepslate_diamond_ore",
+              "redstone_ore",
+              "deepslate_redstone_ore",
+              "clay",
+              "emerald_ore",
+              "deepslate_emerald_ore",
+              "ender_chest",
+              "ancient_debris",
+              "nether_gold_ore",
+              "nether_quartz_ore"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "file": "/data/plugins/Chunky/config.yml",
+      "ops": [
+        {
+          "$set": {
+            "path": "$['continue-on-restart']",
+            "value": true,
+            "value-type": "bool"
+          }
+        },
+        {
+          "$set": {
+            "path": "$['update-interval']",
+            "value": 60,
+            "value-type": "int"
+          }
         }
       ]
     }

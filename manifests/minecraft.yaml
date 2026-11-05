@@ -40,7 +40,8 @@ spec:
     spec:
       automountServiceAccountToken: false
       enableServiceLinks: false
-      terminationGracePeriodSeconds: 150
+      # Room for STOP_SERVER_ANNOUNCE_DELAY and STOP_DURATION together.
+      terminationGracePeriodSeconds: 210
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
@@ -109,6 +110,9 @@ spec:
                   name: minecraft-rcon
                   key: password
             # Game settings.
+            # The world's folder. Changing it starts a fresh world (see README).
+            - name: LEVEL
+              value: world
             - name: MOTD
               value: DripCraft
             - name: MAX_PLAYERS
@@ -126,9 +130,10 @@ spec:
               value: "6"
             - name: SYNC_CHUNK_WRITES
               value: "FALSE"
-            # World pre-generation (see README).
+            # World pre-generation, and a block log with undo that needs NBT-API
+            # (see README).
             - name: MODRINTH_PROJECTS
-              value: chunky:RBuKjN4k
+              value: chunky:RBuKjN4k,nbtapi:h7feK39u,prism:K6DsX6Ko
             # Every connection must carry a PROXY header from the playit agent,
             # which is how the server sees real player addresses. mc-health
             # uses this to send the header itself.
@@ -136,6 +141,9 @@ spec:
               value: "TRUE"
             - name: STOP_DURATION
               value: "120"
+            # Warns players in chat, then waits this many seconds before stopping.
+            - name: STOP_SERVER_ANNOUNCE_DELAY
+              value: "60"
           ports:
             - name: minecraft
               containerPort: 25565

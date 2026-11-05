@@ -1,0 +1,84 @@
+# Every 5 minutes, asks the server for its status through the public tunnel, the
+# same way a player's game does, and pings healthchecks.io if it answers. When the
+# pings stop, healthchecks.io sends the alert, so this also catches the whole
+# cluster or the home connection going down. The address and ping URL live only in
+# the cluster (see README). Until that Secret exists, this does nothing.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: uptime-check
+  labels:
+    app.kubernetes.io/name: uptime-check
+spec:
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 120
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 120
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: uptime-check
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          enableServiceLinks: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: check
+              # Already on the node, and it has both mc-monitor and curl.
+              image: itzg/minecraft-server:java25@sha256:e2fabc536673f8c6b343055c93f7a73e10caa79cd3368f645987593c65adf1e0
+              imagePullPolicy: IfNotPresent
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop:
+                    - ALL
+              command:
+                - sh
+                - -c
+                - |
+                  if [ -z "$SERVER_HOST" ] || [ -z "$SERVER_PORT" ] || [ -z "$PING_URL" ]; then
+                    echo "The uptime-check Secret is not set up yet, so nothing was checked."
+                    exit 0
+                  fi
+                  # mc-monitor's default ping gets no reply through the tunnel, though
+                  # a real game's status request does, so this uses the older list ping.
+                  mc-monitor status --use-server-list-ping --host "$SERVER_HOST" --port "$SERVER_PORT" \
+                    --timeout 15s --retry-limit 3 --retry-interval 10s &&
+                    curl --fail --silent --show-error --max-time 10 --retry 3 --output /dev/null "$PING_URL"
+              env:
+                - name: SERVER_HOST
+                  valueFrom:
+                    secretKeyRef:
+                      name: uptime-check
+                      key: host
+                      optional: true
+                - name: SERVER_PORT
+                  valueFrom:
+                    secretKeyRef:
+                      name: uptime-check
+                      key: port
+                      optional: true
+                - name: PING_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: uptime-check
+                      key: ping-url
+                      optional: true
+              resources:
+                requests:
+                  cpu: 10m
+                  memory: 16Mi
+                limits:
+                  memory: 64Mi

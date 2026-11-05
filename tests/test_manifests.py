@@ -20,6 +20,7 @@ class DripcraftPublicTests(unittest.TestCase):
         cls.objects = {(obj["kind"], obj["metadata"]["name"]): obj for obj in yaml.safe_load_all(text)}
         cls.server = cls.objects[("StatefulSet", "minecraft")]["spec"]["template"]["spec"]
         cls.agent = cls.objects[("Deployment", "playit-agent")]["spec"]["template"]["spec"]
+        cls.uptime = cls.objects[("CronJob", "uptime-check")]["spec"]["jobTemplate"]["spec"]["template"]["spec"]
 
     def env(self, container="minecraft"):
         spec = next(c for c in self.server["containers"] if c["name"] == container)
@@ -37,7 +38,7 @@ class DripcraftPublicTests(unittest.TestCase):
         self.assertEqual(labels["pod-security.kubernetes.io/enforce"], "restricted")
 
     def test_pods_are_locked_down(self):
-        for pod in (self.server, self.agent):
+        for pod in (self.server, self.agent, self.uptime):
             self.assertIs(pod["automountServiceAccountToken"], False)
             self.assertIs(pod["securityContext"]["runAsNonRoot"], True)
             self.assertEqual(pod["securityContext"]["seccompProfile"]["type"], "RuntimeDefault")
@@ -48,7 +49,7 @@ class DripcraftPublicTests(unittest.TestCase):
                 self.assertEqual(context["capabilities"]["drop"], ["ALL"])
 
     def test_images_are_pinned_by_digest(self):
-        for pod in (self.server, self.agent):
+        for pod in (self.server, self.agent, self.uptime):
             for container in pod["containers"]:
                 self.assertRegex(container["image"], r":[\w.-]+@sha256:[0-9a-f]{64}$")
 
@@ -117,11 +118,37 @@ class DripcraftPublicTests(unittest.TestCase):
         )
 
     def test_egress_never_reaches_private_networks(self):
-        for policy in ("minecraft-egress", "playit-agent-egress"):
+        for policy in ("minecraft-egress", "playit-agent-egress", "uptime-check-egress"):
             blocks = [p["ipBlock"] for rule in self.egress(policy) for p in rule["to"] if "ipBlock" in p]
             self.assertEqual(len(blocks), 1, policy)
             self.assertEqual(blocks[0]["cidr"], "0.0.0.0/0")
             self.assertTrue(PRIVATE_RANGES <= set(blocks[0]["except"]), policy)
+
+    def test_restart_warning_fits_in_the_shutdown_window(self):
+        env = self.env()
+        needed = int(env["STOP_SERVER_ANNOUNCE_DELAY"]["value"]) + int(env["STOP_DURATION"]["value"])
+        self.assertGreater(self.server["terminationGracePeriodSeconds"], needed)
+
+    def test_world_folder_is_set_in_git(self):
+        self.assertIn("LEVEL", self.env())
+
+    def test_anti_xray_is_on_and_hides_nether_ores(self):
+        patches = json.loads((ROOT / "manifests" / "tuning-patches.json").read_text())["patches"]
+        ops = {op["$set"]["path"]: op["$set"]["value"] for patch in patches for op in patch["ops"]}
+        self.assertIs(ops["$['anticheat']['anti-xray']['enabled']"], True)
+        hidden = ops["$['anticheat']['anti-xray']['hidden-blocks']"]
+        self.assertLessEqual({"diamond_ore", "deepslate_diamond_ore", "ancient_debris"}, set(hidden))
+
+    def test_prism_is_installed_with_its_required_library(self):
+        projects = dict(item.split(":") for item in self.env()["MODRINTH_PROJECTS"]["value"].split(","))
+        self.assertLessEqual({"chunky", "nbtapi", "prism"}, set(projects))
+
+    def test_uptime_check_secret_stays_out_of_git(self):
+        container = self.uptime["containers"][0]
+        for entry in container["env"]:
+            ref = entry["valueFrom"]["secretKeyRef"]
+            self.assertEqual(ref["name"], "uptime-check")
+            self.assertIs(ref["optional"], True)
 
     def test_server_egress_is_https_only(self):
         rule = next(r for r in self.egress("minecraft-egress") if "ipBlock" in r["to"][0])

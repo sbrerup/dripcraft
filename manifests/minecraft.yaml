@@ -118,7 +118,7 @@ spec:
             # Game settings.
             # The world's folder. Changing it starts a fresh world (see README).
             - name: LEVEL
-              value: world
+              value: dripcraft
             - name: MOTD
               value: DripCraft
             - name: MAX_PLAYERS
@@ -136,10 +136,10 @@ spec:
               value: "6"
             - name: SYNC_CHUNK_WRITES
               value: "FALSE"
-            # Block log with undo, which needs NBT-API, optional voice chat, and chest
-            # sorting (see README).
+            # Block log with undo, which needs NBT-API, optional voice chat, chest
+            # sorting, and world pre-generation from the admin panel (see README).
             - name: MODRINTH_PROJECTS
-              value: nbtapi:h7feK39u,prism:K6DsX6Ko,simple-voice-chat:5OqsnSs7,chestsort-plus:Dftgf7Pm
+              value: nbtapi:h7feK39u,prism:K6DsX6Ko,simple-voice-chat:5OqsnSs7,chestsort-plus:Dftgf7Pm,chunky:RBuKjN4k
             # Every connection must carry a PROXY header from the playit agent,
             # which is how the server sees real player addresses. mc-health
             # uses this to send the header itself.

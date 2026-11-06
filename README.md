@@ -155,8 +155,17 @@ the folder named by `LEVEL` inside it, with Minecraft's standard generation. Cha
 settings are outside the world folder, so they carry over. Inventories, advancements
 and game rules are inside it, so they start over.
 
-Terrain is generated as players explore. The server deliberately has no
-pre-generation.
+## Pre-generation
+
+Chunky creates terrain ahead of time, so exploring does not make the server generate
+it during play. Start it from **Pre-generate the world** on the admin panel's Dashboard.
+The radius is in blocks and a radius of 0 skips that dimension. Nether distances count
+eight times over in the overworld, so a Nether radius of one eighth the overworld's
+covers the same ground. The work carries on across restarts. Check the seed first,
+because a new seed means starting over.
+
+Each chunk takes about 10 KB, so expect a world with a radius of 10,000 to reach about
+15 GB. The periodic backups grow with it.
 
 ## Profiling
 

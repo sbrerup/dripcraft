@@ -181,7 +181,12 @@ The periodic backups grow with it.
 
 To control it, use the panel's Console page. `chunky pause` stops it and keeps the
 progress, and `chunky continue` carries on. To stop for good, run `chunky cancel`
-followed by `chunky confirm`, because cancelling asks for confirmation.
+followed by `chunky confirm`, because cancelling asks for confirmation. Add a world, such
+as `chunky pause minecraft:the_end`, to control one dimension. A restart resumes every
+paused task, so pause them again afterwards.
+
+Each dimension runs as its own task, and running one alone is the fastest. The overworld
+ran at 57 to 70 chunks a second on its own, and about 37 alongside the other two.
 
 ## Profiling
 
@@ -210,6 +215,11 @@ visible, which is Paper's default. Honest players do not notice it.
 
 Keep `mob-spawn-range` equal to `SIMULATION_DISTANCE`. Both limits apply, so the
 smaller one wins: mobs cannot spawn where the world is not running.
+
+The server shares its node with other workloads. Its 10 GiB of memory is reserved, and
+it is guaranteed 3.4 of the node's 8 CPU cores, using more when the node is idle. That
+guarantee covers CPU time only. The disk, the home network and the host machine are
+still shared, and exclusive cores would need a change to the node's own configuration.
 
 ## Backups
 

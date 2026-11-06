@@ -75,18 +75,6 @@
       ]
     },
     {
-      "file": "/data/config/paper-global.yml",
-      "ops": [
-        {
-          "$set": {
-            "path": "$['chunk-system']['worker-threads']",
-            "value": 4,
-            "value-type": "int"
-          }
-        }
-      ]
-    },
-    {
       "file": "/data/plugins/Chunky/config.yml",
       "ops": [
         {

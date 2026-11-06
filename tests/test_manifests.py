@@ -69,9 +69,14 @@ class DripcraftPublicTests(unittest.TestCase):
         self.assertIn("/tmp/chunky-paused", env["POST_BACKUP_SCRIPT"]["value"])
 
     def test_chunk_workers_are_set(self):
+        config = yaml.safe_load((ROOT / "manifests" / "paper-global.yml").read_text())
+        self.assertEqual(config["chunk-system"]["worker-threads"], 4)
+
+    def test_no_patch_targets_the_copied_paper_config(self):
+        # The image replaces this file with the short copy before it patches, so a patch
+        # finds nothing to set and the server fails to start.
         patches = json.loads((ROOT / "manifests" / "tuning-patches.json").read_text())["patches"]
-        ops = {op["$set"]["path"]: op["$set"]["value"] for patch in patches for op in patch["ops"]}
-        self.assertEqual(ops["$['chunk-system']['worker-threads']"], 4)
+        self.assertNotIn("/data/config/paper-global.yml", [patch["file"] for patch in patches])
 
     def test_floodgate_is_pinned_to_one_build(self):
         self.assertRegex(self.env()["PLUGINS"]["value"], r"/projects/floodgate/versions/[\d.]+/builds/\d+/downloads/spigot$")

@@ -233,6 +233,11 @@ of those options in the volume is overwritten. On a brand new volume the files d
 not exist yet, so the patch is skipped with a warning and takes effect from the
 second start.
 
+Options in `paper-global.yml` go in `manifests/paper-global.yml` instead. The image
+replaces that file with the short copy before it patches, so a patch finds nothing to
+set and the server fails to start. That file sets 4 chunk workers, because Paper chooses
+only 2 on this node, and players loading terrain share them with pre-generation.
+
 It also turns on Paper's anti-xray, which hides ores from players until they are
 next to them, with the Nether's ores added to the hidden list. Ores above Y 64 stay
 visible, which is Paper's default. Honest players do not notice it.

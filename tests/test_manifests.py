@@ -165,7 +165,12 @@ class DripcraftPublicTests(unittest.TestCase):
 
     def test_only_approved_plugins_are_installed(self):
         projects = dict(item.split(":") for item in self.env()["MODRINTH_PROJECTS"]["value"].split(","))
-        self.assertEqual({"nbtapi", "prism", "simple-voice-chat", "chestsort-plus"}, set(projects))
+        self.assertEqual({"nbtapi", "prism", "simple-voice-chat", "chestsort-plus", "chunky"}, set(projects))
+
+    def test_pre_generation_continues_after_a_restart(self):
+        patches = json.loads((ROOT / "manifests" / "tuning-patches.json").read_text())["patches"]
+        ops = {op["$set"]["path"]: op["$set"]["value"] for patch in patches for op in patch["ops"]}
+        self.assertIs(ops["$['continue-on-restart']"], True)
 
     def test_players_get_sorting_and_nothing_else(self):
         text = (ROOT / "manifests" / "player-permissions.yml").read_text()

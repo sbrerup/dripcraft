@@ -164,8 +164,13 @@ eight times over in the overworld, so a Nether radius of one eighth the overworl
 covers the same ground. The work carries on across restarts. Check the seed first,
 because a new seed means starting over.
 
-Each chunk takes about 10 KB, so expect a world with a radius of 10,000 to reach about
-15 GB. The periodic backups grow with it.
+It generates about 55 chunks a second here, so a radius of 10,000 in the overworld takes
+about 8 hours. Each chunk takes about 18 KB, so expect that world to reach about 30 GB.
+The periodic backups grow with it.
+
+To control it, use the panel's Console page. `chunky pause` stops it and keeps the
+progress, and `chunky continue` carries on. To stop for good, run `chunky cancel`
+followed by `chunky confirm`, because cancelling asks for confirmation.
 
 ## Profiling
 

@@ -177,9 +177,12 @@ spec:
             timeoutSeconds: 15
             failureThreshold: 5
           resources:
-            # No CPU limit: throttling the JVM causes tick stalls.
+            # No CPU limit: throttling the JVM causes tick stalls. The request is
+            # what this server is guaranteed on a shared node, and it can use more
+            # when the node is idle. Leave 1 core unreserved on the node, because
+            # firecrawl-api needs that much free to roll out an update.
             requests:
-              cpu: "2"
+              cpu: 3400m
               memory: 10Gi
             limits:
               memory: 10Gi

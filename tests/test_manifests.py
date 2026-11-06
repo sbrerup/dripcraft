@@ -55,9 +55,15 @@ class DripcraftPublicTests(unittest.TestCase):
 
     def test_only_whitelisted_online_accounts_can_join(self):
         env = self.env()
-        for name in ("ONLINE_MODE", "ENABLE_WHITELIST", "ENFORCE_WHITELIST", "ENFORCE_SECURE_PROFILE"):
+        for name in ("ONLINE_MODE", "ENABLE_WHITELIST", "ENFORCE_WHITELIST"):
             self.assertEqual(env[name]["value"], "TRUE", name)
         self.assertEqual(env["ENABLE_QUERY"]["value"], "FALSE")
+
+    def test_bedrock_players_can_chat(self):
+        self.assertEqual(self.env()["ENFORCE_SECURE_PROFILE"]["value"], "FALSE")
+
+    def test_floodgate_is_pinned_to_one_build(self):
+        self.assertRegex(self.env()["PLUGINS"]["value"], r"/projects/floodgate/versions/[\d.]+/builds/\d+/downloads/spigot$")
 
     def test_secrets_are_referenced_not_inlined(self):
         for container in ("minecraft", "backup"):
@@ -103,7 +109,7 @@ class DripcraftPublicTests(unittest.TestCase):
         self.assertEqual(service.get("type", "ClusterIP"), "ClusterIP")
         self.assertEqual(
             [(p["protocol"], p["port"]) for p in service["ports"]],
-            [("TCP", 25565), ("UDP", 24454)],
+            [("TCP", 25565), ("UDP", 24454), ("UDP", 19132)],
         )
 
     def test_default_deny_both_ways(self):
@@ -111,24 +117,29 @@ class DripcraftPublicTests(unittest.TestCase):
         self.assertEqual(spec["podSelector"], {})
         self.assertEqual(set(spec["policyTypes"]), {"Ingress", "Egress"})
 
-    def test_only_the_agent_reaches_only_the_game_and_voice_ports(self):
+    def test_only_the_agent_reaches_only_the_public_ports(self):
         rules = self.objects[("NetworkPolicy", "minecraft-ingress")]["spec"]["ingress"]
         self.assertEqual(len(rules), 1)
         self.assertEqual(
             rules[0]["ports"],
-            [{"protocol": "TCP", "port": 25565}, {"protocol": "UDP", "port": 24454}],
+            [
+                {"protocol": "TCP", "port": 25565},
+                {"protocol": "UDP", "port": 24454},
+                {"protocol": "UDP", "port": 19132},
+            ],
         )
         self.assertEqual(
             rules[0]["from"],
             [{"podSelector": {"matchLabels": {"app.kubernetes.io/name": "playit-agent"}}}],
         )
 
-    def test_agent_can_reach_the_voice_port(self):
+    def test_agent_can_reach_the_voice_and_bedrock_ports(self):
         rule = next(
             r for r in self.egress("playit-agent-egress")
             if r["to"][0].get("podSelector", {}).get("matchLabels", {}).get("app.kubernetes.io/name") == "minecraft"
         )
         self.assertIn({"protocol": "UDP", "port": 24454}, rule["ports"])
+        self.assertIn({"protocol": "UDP", "port": 19132}, rule["ports"])
 
     def test_voice_port_is_the_same_everywhere(self):
         server = next(c for c in self.server["containers"] if c["name"] == "minecraft")
@@ -165,7 +176,7 @@ class DripcraftPublicTests(unittest.TestCase):
 
     def test_only_approved_plugins_are_installed(self):
         projects = dict(item.split(":") for item in self.env()["MODRINTH_PROJECTS"]["value"].split(","))
-        self.assertEqual({"nbtapi", "prism", "simple-voice-chat", "chestsort-plus", "chunky"}, set(projects))
+        self.assertEqual({"nbtapi", "prism", "simple-voice-chat", "chestsort-plus", "chunky", "geyser"}, set(projects))
 
     def test_pre_generation_continues_after_a_restart(self):
         patches = json.loads((ROOT / "manifests" / "tuning-patches.json").read_text())["patches"]

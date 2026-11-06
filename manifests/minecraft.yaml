@@ -15,6 +15,12 @@ spec:
       port: 25565
       targetPort: minecraft
       protocol: TCP
+    # Simple Voice Chat. Has its own playit tunnel, because voice is UDP and the
+    # Minecraft tunnel carries TCP only (see README).
+    - name: voicechat
+      port: 24454
+      targetPort: voicechat
+      protocol: UDP
 ---
 apiVersion: apps/v1
 kind: StatefulSet
@@ -124,16 +130,16 @@ spec:
             # The main thread is the bottleneck on this CPU: keep chunks
             # simulated close to players, and let ZFS handle write ordering.
             - name: VIEW_DISTANCE
-              value: "10"
+              value: "16"
             # Keep mob-spawn-range in tuning-patches.json equal to this.
             - name: SIMULATION_DISTANCE
               value: "6"
             - name: SYNC_CHUNK_WRITES
               value: "FALSE"
-            # World pre-generation, and a block log with undo that needs NBT-API
-            # (see README).
+            # Block log with undo, which needs NBT-API, optional voice chat, and chest
+            # sorting (see README).
             - name: MODRINTH_PROJECTS
-              value: chunky:RBuKjN4k,nbtapi:h7feK39u,prism:K6DsX6Ko
+              value: nbtapi:h7feK39u,prism:K6DsX6Ko,simple-voice-chat:5OqsnSs7,chestsort-plus:Dftgf7Pm
             # Every connection must carry a PROXY header from the playit agent,
             # which is how the server sees real player addresses. mc-health
             # uses this to send the header itself.
@@ -148,6 +154,9 @@ spec:
             - name: minecraft
               containerPort: 25565
               protocol: TCP
+            - name: voicechat
+              containerPort: 24454
+              protocol: UDP
           # First boot downloads Paper and generates the world.
           startupProbe:
             exec:
@@ -175,11 +184,20 @@ spec:
             limits:
               memory: 10Gi
           volumeMounts:
+            # One folder per server on this volume. The test server from before
+            # launch is still at the top of the volume, out of reach (see README).
+            # The folder must exist and belong to uid 1000 before a pod starts,
+            # because local-path volumes ignore fsGroup.
             - name: data
               mountPath: /data
+              subPath: server
             - name: paper-config
               mountPath: /config/paper-global.yml
               subPath: paper-global.yml
+              readOnly: true
+            - name: paper-config
+              mountPath: /config/player-permissions.yml
+              subPath: player-permissions.yml
               readOnly: true
             - name: paper-config
               mountPath: /patches/tuning-patches.json
@@ -231,6 +249,7 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data
+              subPath: server
               readOnly: true
             - name: backups
               mountPath: /backups

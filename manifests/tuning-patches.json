@@ -64,20 +64,12 @@
       ]
     },
     {
-      "file": "/data/plugins/Chunky/config.yml",
+      "file": "/data/bukkit.yml",
       "ops": [
         {
           "$set": {
-            "path": "$['continue-on-restart']",
-            "value": true,
-            "value-type": "bool"
-          }
-        },
-        {
-          "$set": {
-            "path": "$['update-interval']",
-            "value": 60,
-            "value-type": "int"
+            "path": "$['settings']['permissions-file']",
+            "value": "config/player-permissions.yml"
           }
         }
       ]

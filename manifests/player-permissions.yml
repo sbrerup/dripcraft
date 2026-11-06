@@ -1,0 +1,9 @@
+# What every player gets without being an operator. Copied to /data/config on start,
+# and read through settings.permissions-file, set in tuning-patches.json. It has its
+# own name because the admin panel treats any /data/permissions.yml as the test phase's
+# leftover file, and offers to delete it.
+dripcraft.player:
+  description: Permissions for every player
+  default: true
+  children:
+    chestsort.use: true

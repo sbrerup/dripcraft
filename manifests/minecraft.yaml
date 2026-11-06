@@ -240,8 +240,23 @@ spec:
               value: 6h
             - name: INITIAL_DELAY
               value: 15m
+            # A pre-generated world makes each archive large, so 2 days of them.
             - name: PRUNE_BACKUPS_DAYS
-              value: "7"
+              value: "2"
+            # Chunky writes to the world while it generates, which makes tar report
+            # a failed backup. Pause what is running, and resume only that afterwards.
+            # The wait lets chunks it loaded unload and save.
+            - name: PRE_SAVE_ALL_SCRIPT
+              value: |
+                rcon-cli chunky progress | grep -o 'minecraft:[a-z_]*' | sort -u > /tmp/chunky-paused || true
+                while read -r world; do rcon-cli chunky pause "$world" > /dev/null || true; done < /tmp/chunky-paused
+                [ -s /tmp/chunky-paused ] && sleep 20
+                true
+            - name: POST_BACKUP_SCRIPT
+              value: |
+                while read -r world; do rcon-cli chunky continue "$world" > /dev/null || true; done < /tmp/chunky-paused
+                : > /tmp/chunky-paused
+                true
             - name: SRC_DIR
               value: /data
             - name: DEST_DIR

@@ -247,13 +247,26 @@ still shared, and exclusive cores would need a change to the node's own configur
 
 ## Backups
 
-The `backup` sidecar writes `/backups/world-*.tar.gz` every 6 hours and keeps 7
-days. Plugin and server jars are left out, because the image downloads them
+The `backup` sidecar writes `/backups/world-*.tar.gz` every 6 hours and keeps 2
+days, and pauses any running pre-generation while it does. Plugin and server jars are left out, because the image downloads them
 again on start. These archives are on the same disk as the world, and whether the
 nightly labmox VM backup covers this volume has not been checked.
 
-To restore, scale the StatefulSet to 0, unpack an archive over the `data` volume
-from a temporary pod, and scale back up.
+To restore, do not scale the StatefulSet down, because Argo CD scales it straight back
+up. Instead, unpack the archive into a new folder and point the server at it:
+
+1. From a temporary pod that mounts the `data-minecraft-0` and `backups-minecraft-0`
+   claims, unpack the archive into a new folder on the data volume, such as
+   `restored-20261106`. The pod must run as uid 1000, so the server can write there.
+   Archives hold the contents of the server's folder, so unpack them inside the new
+   folder rather than over the top of the volume.
+2. In a commit, change `subPath: server` to the new folder in both containers. The
+   server restarts into the restored files, and the image downloads the jars that
+   periodic archives leave out.
+3. The old folder stays on the volume until you remove it.
+
+A periodic archive holds no secrets from Git, but it does hold Geyser's tunnel token and
+Floodgate's key, so treat it as private. This procedure has not been run end to end.
 
 The test server from before launch is kept twice, in case anyone wants it back. Its
 files are still at the top of the data volume, outside the `server` folder, so this

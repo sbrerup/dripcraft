@@ -62,6 +62,17 @@ class DripcraftPublicTests(unittest.TestCase):
     def test_bedrock_players_can_chat(self):
         self.assertEqual(self.env()["ENFORCE_SECURE_PROFILE"]["value"], "FALSE")
 
+    def test_backups_pause_pre_generation_and_resume_only_what_they_paused(self):
+        env = self.env("backup")
+        self.assertIn("chunky pause", env["PRE_SAVE_ALL_SCRIPT"]["value"])
+        self.assertIn("chunky continue", env["POST_BACKUP_SCRIPT"]["value"])
+        self.assertIn("/tmp/chunky-paused", env["POST_BACKUP_SCRIPT"]["value"])
+
+    def test_chunk_workers_are_set(self):
+        patches = json.loads((ROOT / "manifests" / "tuning-patches.json").read_text())["patches"]
+        ops = {op["$set"]["path"]: op["$set"]["value"] for patch in patches for op in patch["ops"]}
+        self.assertEqual(ops["$['chunk-system']['worker-threads']"], 4)
+
     def test_floodgate_is_pinned_to_one_build(self):
         self.assertRegex(self.env()["PLUGINS"]["value"], r"/projects/floodgate/versions/[\d.]+/builds/\d+/downloads/spigot$")
 

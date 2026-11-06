@@ -2,7 +2,7 @@
 # and read through settings.permissions-file, set in tuning-patches.json. It has its
 # own name because the admin panel treats any /data/permissions.yml as the test phase's
 # leftover file, and offers to delete it.
-dripcraft.player:
+lushacres.player:
   description: Permissions for every player
   default: true
   children:

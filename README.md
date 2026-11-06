@@ -1,9 +1,13 @@
-# DripCraft
+# Lush Acres
 
 An internet-facing Paper server for 4-10 players, reached through a
 [playit.gg](https://playit.gg) tunnel. It has its own namespace, memory limit and
 network policy, because it takes connections from the internet on a node shared
 with everything else.
+
+The server used to be called DripCraft. That name remains in this repository's name,
+the Kubernetes namespace, the admin panel and the world folder, where players never see
+it. Renaming the namespace means moving the live server and its volumes.
 
 Argo CD deploys `manifests/` from `main` to the labmox cluster, so anything merged
 here goes live. The cluster finds this repository through
@@ -45,6 +49,11 @@ immediately. It is also why a plain status check of port 25565 hangs; use
 
 Voice chat needs a second tunnel, because voice is UDP and the Minecraft tunnel
 carries TCP only. See [Voice chat](#voice-chat).
+
+Both tunnels use playit Premium's Europe region, because the server is in Denmark, and
+the Minecraft tunnel has a custom domain through a gateway. A region cannot be changed on
+an existing tunnel, so moving to another region means a new tunnel and a new address. A
+new tunnel takes a few minutes to start working, until the agent has picked it up.
 
 For the alert when the server goes down, create a check at
 [healthchecks.io](https://healthchecks.io) with a 5 minute period and 5 minutes of
@@ -91,7 +100,9 @@ because the mod and the plugin must share a compatibility version.
 In the playit dashboard, add a tunnel to this agent:
 
 - **Tunnel type:** MC: Simple Voice Chat
+- **Region:** Europe
 - **Local address:** `10.96.25.65`, port `24454`
+- **Proxy Protocol:** None
 
 Put the address playit shows for that tunnel in `voice_host`, then restart the
 server. It stays on the data volume rather than in Git, because this repository
@@ -99,7 +110,7 @@ is public. If playit ever changes the tunnel's address, change `voice_host` to m
 
 ```bash
 kubectl -n dripcraft-public exec minecraft-0 -c minecraft -- \
-  sed -i 's/^voice_host=.*/voice_host=IP:PORT/' /data/plugins/voicechat/voicechat-server.properties
+  sed -i 's/^voice_host=.*/voice_host=HOST:PORT/' /data/plugins/voicechat/voicechat-server.properties
 ```
 
 The Minecraft connection working says nothing about voice, which is why voice has

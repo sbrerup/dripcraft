@@ -174,7 +174,7 @@ class DripcraftPublicTests(unittest.TestCase):
 
     def test_players_get_sorting_and_nothing_else(self):
         text = (ROOT / "manifests" / "player-permissions.yml").read_text()
-        grant = yaml.safe_load(text)["dripcraft.player"]
+        grant = yaml.safe_load(text)["lushacres.player"]
         self.assertIs(grant["default"], True)
         self.assertEqual(grant["children"], {"chestsort.use": True})
 

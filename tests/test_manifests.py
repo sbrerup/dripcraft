@@ -72,6 +72,12 @@ class DripcraftPublicTests(unittest.TestCase):
         config = yaml.safe_load((ROOT / "manifests" / "paper-global.yml").read_text())
         self.assertEqual(config["chunk-system"]["worker-threads"], 4)
 
+    def test_tree_felling_wears_axes_fully_and_does_not_replant(self):
+        patches = json.loads((ROOT / "manifests" / "tuning-patches.json").read_text())["patches"]
+        patch = next(p for p in patches if p["file"] == "/data/plugins/Timberella/config.yml")
+        ops = {op["$set"]["path"]: op["$set"]["value"] for op in patch["ops"]}
+        self.assertEqual(ops, {"$['enable_replant']": False, "$['tools']['durability_multiplier']": 1})
+
     def test_no_patch_targets_the_copied_paper_config(self):
         # The image replaces this file with the short copy before it patches, so a patch
         # finds nothing to set and the server fails to start.
@@ -192,7 +198,7 @@ class DripcraftPublicTests(unittest.TestCase):
 
     def test_only_approved_plugins_are_installed(self):
         projects = dict(item.split(":") for item in self.env()["MODRINTH_PROJECTS"]["value"].split(","))
-        self.assertEqual({"nbtapi", "prism", "simple-voice-chat", "chestsort-plus", "chunky", "geyser"}, set(projects))
+        self.assertEqual({"nbtapi", "prism", "simple-voice-chat", "chestsort-plus", "chunky", "geyser", "timberella"}, set(projects))
 
     def test_pre_generation_continues_after_a_restart(self):
         patches = json.loads((ROOT / "manifests" / "tuning-patches.json").read_text())["patches"]

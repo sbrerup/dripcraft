@@ -2,3 +2,6 @@
 # the tunnel's Proxy Protocol setting in the playit dashboard (Version 2).
 proxies:
   proxy-protocol: true
+# Paper chooses only 2 on this node, shared by players loading terrain and pre-generation.
+chunk-system:
+  worker-threads: 4

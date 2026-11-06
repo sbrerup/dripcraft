@@ -247,10 +247,12 @@ still shared, and exclusive cores would need a change to the node's own configur
 
 ## Backups
 
-The `backup` sidecar writes `/backups/world-*.tar.gz` every 6 hours and keeps 2
-days, and pauses any running pre-generation while it does. Plugin and server jars are left out, because the image downloads them
-again on start. These archives are on the same disk as the world, and whether the
-nightly labmox VM backup covers this volume has not been checked.
+The `backup` sidecar writes `/backups/world-*.tar.gz` every 6 hours and keeps 2 days.
+It pauses any running pre-generation while it does, because tar reports a failed backup
+if the world changes underneath it, and resumes only what it paused. Plugin and server
+jars are left out, because the image downloads them again on start. These archives are
+on the same disk as the world, and whether the nightly labmox VM backup covers this
+volume has not been checked.
 
 To restore, do not scale the StatefulSet down, because Argo CD scales it straight back
 up. Instead, unpack the archive into a new folder and point the server at it:

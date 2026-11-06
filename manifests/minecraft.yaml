@@ -120,7 +120,7 @@ spec:
             - name: LEVEL
               value: dripcraft
             - name: MOTD
-              value: DripCraft
+              value: Lush Acres
             - name: MAX_PLAYERS
               value: "10"
             - name: DIFFICULTY

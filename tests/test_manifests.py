@@ -101,21 +101,45 @@ class DripcraftPublicTests(unittest.TestCase):
         service = self.objects[("Service", "minecraft")]["spec"]
         self.assertEqual(service["clusterIP"], "10.96.25.65")
         self.assertEqual(service.get("type", "ClusterIP"), "ClusterIP")
-        self.assertEqual([p["port"] for p in service["ports"]], [25565])
+        self.assertEqual(
+            [(p["protocol"], p["port"]) for p in service["ports"]],
+            [("TCP", 25565), ("UDP", 24454)],
+        )
 
     def test_default_deny_both_ways(self):
         spec = self.objects[("NetworkPolicy", "default-deny")]["spec"]
         self.assertEqual(spec["podSelector"], {})
         self.assertEqual(set(spec["policyTypes"]), {"Ingress", "Egress"})
 
-    def test_only_the_agent_reaches_only_the_game_port(self):
+    def test_only_the_agent_reaches_only_the_game_and_voice_ports(self):
         rules = self.objects[("NetworkPolicy", "minecraft-ingress")]["spec"]["ingress"]
         self.assertEqual(len(rules), 1)
-        self.assertEqual(rules[0]["ports"], [{"protocol": "TCP", "port": 25565}])
+        self.assertEqual(
+            rules[0]["ports"],
+            [{"protocol": "TCP", "port": 25565}, {"protocol": "UDP", "port": 24454}],
+        )
         self.assertEqual(
             rules[0]["from"],
             [{"podSelector": {"matchLabels": {"app.kubernetes.io/name": "playit-agent"}}}],
         )
+
+    def test_agent_can_reach_the_voice_port(self):
+        rule = next(
+            r for r in self.egress("playit-agent-egress")
+            if r["to"][0].get("podSelector", {}).get("matchLabels", {}).get("app.kubernetes.io/name") == "minecraft"
+        )
+        self.assertIn({"protocol": "UDP", "port": 24454}, rule["ports"])
+
+    def test_voice_port_is_the_same_everywhere(self):
+        server = next(c for c in self.server["containers"] if c["name"] == "minecraft")
+        ports = {p["name"]: (p["protocol"], p["containerPort"]) for p in server["ports"]}
+        self.assertEqual(ports["voicechat"], ("UDP", 24454))
+
+    def test_server_and_backups_use_the_same_folder(self):
+        for name in ("minecraft", "backup"):
+            container = next(c for c in self.server["containers"] if c["name"] == name)
+            mount = next(m for m in container["volumeMounts"] if m["name"] == "data")
+            self.assertEqual((mount["mountPath"], mount["subPath"]), ("/data", "server"), name)
 
     def test_egress_never_reaches_private_networks(self):
         for policy in ("minecraft-egress", "playit-agent-egress", "uptime-check-egress"):
@@ -139,9 +163,23 @@ class DripcraftPublicTests(unittest.TestCase):
         hidden = ops["$['anticheat']['anti-xray']['hidden-blocks']"]
         self.assertLessEqual({"diamond_ore", "deepslate_diamond_ore", "ancient_debris"}, set(hidden))
 
-    def test_prism_is_installed_with_its_required_library(self):
+    def test_only_approved_plugins_are_installed(self):
         projects = dict(item.split(":") for item in self.env()["MODRINTH_PROJECTS"]["value"].split(","))
-        self.assertLessEqual({"chunky", "nbtapi", "prism"}, set(projects))
+        self.assertEqual({"nbtapi", "prism", "simple-voice-chat", "chestsort-plus"}, set(projects))
+
+    def test_players_get_sorting_and_nothing_else(self):
+        text = (ROOT / "manifests" / "player-permissions.yml").read_text()
+        grant = yaml.safe_load(text)["dripcraft.player"]
+        self.assertIs(grant["default"], True)
+        self.assertEqual(grant["children"], {"chestsort.use": True})
+
+    def test_permissions_file_is_where_bukkit_is_told_to_look(self):
+        patches = json.loads((ROOT / "manifests" / "tuning-patches.json").read_text())["patches"]
+        ops = {op["$set"]["path"]: op["$set"]["value"] for patch in patches for op in patch["ops"]}
+        self.assertEqual(ops["$['settings']['permissions-file']"], "config/player-permissions.yml")
+        server = next(c for c in self.server["containers"] if c["name"] == "minecraft")
+        mounts = {m["mountPath"]: m for m in server["volumeMounts"]}
+        self.assertEqual(mounts["/config/player-permissions.yml"]["subPath"], "player-permissions.yml")
 
     def test_uptime_check_secret_stays_out_of_git(self):
         container = self.uptime["containers"][0]

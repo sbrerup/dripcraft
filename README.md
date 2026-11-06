@@ -18,8 +18,8 @@ player -> playit edge -> playit-agent pod -> minecraft pod (Paper + backup sidec
 ```
 
 Network policy limits the server to HTTPS and DNS, and the agent to DNS, the
-public internet and the server's game port. Neither can reach the LAN, the
-tailnet or the rest of the cluster.
+public internet and the server's game and voice ports. Neither can reach the LAN,
+the tailnet or the rest of the cluster.
 
 ## Setup
 
@@ -42,6 +42,9 @@ The Proxy Protocol setting must match `proxies.proxy-protocol` in
 `manifests/paper-global.yml`. If only one side has it on, players are disconnected
 immediately. It is also why a plain status check of port 25565 hangs; use
 `mc-health`, which sends the header.
+
+Voice chat needs a second tunnel, because voice is UDP and the Minecraft tunnel
+carries TCP only. See [Voice chat](#voice-chat).
 
 For the alert when the server goes down, create a check at
 [healthchecks.io](https://healthchecks.io) with a 5 minute period and 5 minutes of
@@ -78,61 +81,95 @@ A restart announces itself in chat, then waits 60 seconds before stopping, so
 players are not dropped without warning. Merging a change that restarts the server
 therefore takes about a minute longer.
 
-During the test phase, every player can use `/gamemode`, through
-`/data/permissions.yml` on the data volume. That file is deliberately not in Git.
+## Voice chat
+
+Simple Voice Chat is optional: players without the client mod join and play as
+normal, they just cannot hear or talk. Players who want voice install a 2.6.x build
+of the mod for Minecraft 26.3. A build from another 2.x series may not connect,
+because the mod and the plugin must share a compatibility version.
+
+In the playit dashboard, add a tunnel to this agent:
+
+- **Tunnel type:** MC: Simple Voice Chat
+- **Local address:** `10.96.25.65`, port `24454`
+
+Put the address playit shows for that tunnel in `voice_host`, then restart the
+server. It stays on the data volume rather than in Git, because this repository
+is public. If playit ever changes the tunnel's address, change `voice_host` to match.
+
+```bash
+kubectl -n dripcraft-public exec minecraft-0 -c minecraft -- \
+  sed -i 's/^voice_host=.*/voice_host=IP:PORT/' /data/plugins/voicechat/voicechat-server.properties
+```
+
+The Minecraft connection working says nothing about voice, which is why voice has
+its own check. The voice server answers a small UDP ping, with no game client needed,
+so sending one to the tunnel's address proves the whole path. It does not prove that
+audio works, which takes two players with the mod.
 
 ## Grief log
 
-Prism records who placed, broke or took what, from the moment it is installed, in
-`plugins/prism/prism.db` on the data volume, and it purges records older than six
-weeks. Players never see it. An operator uses it in game:
+Prism records who placed, broke or took what, in `plugins/prism/prism.db` on the data
+volume, and it purges records older than six weeks. Players cannot use it. An operator
+uses it in game:
 
-- `/pr wand inspect`, then click a block to see who changed it. `/pr wand` puts the
-  wand away.
-- `/pr rollback p:NAME r:30 since:1d` undoes what that player did within 30 blocks
-  in the last day.
+- `/pr wand inspect`, then left-click a block or chest to see who changed it. A right
+  click looks at the space next to the block instead. `/pr wand` puts the wand away.
+- `/pr lookup p:NAME r:30 since:1d` lists what that player did within 30 blocks in
+  the last day.
+- `/pr rollback p:NAME r:30 since:1d` undoes it. `/pr undo` takes that back for blocks,
+  and `/pr restore` applies the player's changes again.
 
-## Starting the real world
+Chests need care, because Prism can give back more than was taken:
 
-The world lives in the folder named by `LEVEL` in `manifests/minecraft.yaml`.
+- Never preview a rollback that includes chests. `/pr preview-rollback` puts the
+  items in the chest for real, and `/pr preview-cancel` does not take them out. To
+  preview safely, limit it to blocks with `a:block-break,block-place`.
+- Rollback returns what was taken but does not remove what was put in. If a player
+  picks up a stack of 16 and puts 11 back, a rollback adds 16 to the 11, leaving 27.
+- `/pr undo` does not remove items a rollback returned.
 
-1. Delete the test phase's `/data/permissions.yml`, or every player keeps `/gamemode`
-   in the real world:
+So look in the chest before and after a rollback. Blocks, doors, broken chests with
+their contents, TNT damage and lava all roll back exactly.
 
-   ```bash
-   kubectl -n dripcraft-public exec minecraft-0 -c minecraft -- rm /data/permissions.yml
-   ```
+## Chest sorting
 
-2. In a pull request, change `LEVEL` to a new name, such as `dripcraft`, and merge
-   it. The server restarts and creates a fresh world there. The whitelist, operators
-   and server settings are outside the world folder, so they carry over. Inventories,
-   advancements and game rules are inside it, so they start over.
-3. Pre-generate the new world, so exploring does not make the server create terrain
-   during play:
+Chestsort+ lets players sort chests and their own inventory. It is off for each player
+until they turn it on: `/chestsort` opens a dialog where they choose a sorting key
+and whether to sort automatically. Players can use it without being operators because
+`manifests/player-permissions.yml` grants `chestsort.use` to everyone. That file is in
+Git and has its own name, so keep it that way: the admin panel treats any
+`/data/permissions.yml` as a leftover from the test phase and offers to delete it.
 
-   ```bash
-   scripts/launch.sh
-   ```
+The same dialog offers quick item transfer between a chest and the inventory, which
+cannot be turned off for the whole server.
 
-   It returns straight away and the work carries on inside the server, also across
-   restarts. The defaults (`OVERWORLD_RADIUS` 5000, `NETHER_RADIUS` and `END_RADIUS`
-   2500) take about 3 hours at the rate measured here. Players can join while it runs.
-   See how far it is with `rcon-cli chunky progress`.
-4. Set any game rules again.
-5. The old world stays on disk, and in the backups, until you delete its folder.
+The original ChestSort crashes on start on Minecraft 26.x, because it cannot read
+the new version format.
 
-## Test night
+## The world
 
-Run through this with real players on the test world before the real start:
+The server's files live in the `server` folder of the data volume, and the world in
+the folder named by `LEVEL` inside it, with Minecraft's standard generation. Changing
+`LEVEL` to a new name starts a fresh world there. The whitelist, operators and server
+settings are outside the world folder, so they carry over. Inventories, advancements
+and game rules are inside it, so they start over.
 
-1. Add everyone to the whitelist, make one person an operator, and have everyone join.
-2. Spread out, walking and flying in different directions, with some players in the
-   Nether and the End.
-3. Build a mob farm from YouTube and stand at it until it should be producing.
-4. Have someone break a few blocks, find them with `/pr wand inspect` and undo them
-   with `/pr rollback`.
-5. While this goes on, check `mspt` with `rcon-cli`, and run
-   `/spark profiler start --timeout 600` in game. Spark gives a link to the results.
+Terrain is generated as players explore. The server deliberately has no
+pre-generation.
+
+## Profiling
+
+Spark comes with Paper. Only operators can use it, and its replies do not come back
+through `rcon-cli`. In game:
+
+```text
+/spark tps
+/spark profiler start --timeout 600
+```
+
+Health reports and profiler results upload to a public link on spark.lucko.me unless
+you add `--save-to-file`, which keeps them in `plugins/spark` on the data volume.
 
 ## Tuning
 
@@ -158,6 +195,14 @@ nightly labmox VM backup covers this volume has not been checked.
 
 To restore, scale the StatefulSet to 0, unpack an archive over the `data` volume
 from a temporary pod, and scale back up.
+
+The test server from before launch is kept twice, in case anyone wants it back. Its
+files are still at the top of the data volume, outside the `server` folder, so this
+server never reads them. A full copy, plugin jars included, is in
+`/backups/pre-golive-20261106`. The sidecar prunes only the top level of `/backups`, so
+that subfolder is never deleted automatically. Neither is on a separate disk.
+
+To go back to the test server, revert the commit that started this server.
 
 ## Updating
 

@@ -144,10 +144,10 @@ spec:
             - name: SYNC_CHUNK_WRITES
               value: "FALSE"
             # Block log with undo, which needs NBT-API, optional voice chat, chest
-            # sorting, world pre-generation from the admin panel, and Bedrock
-            # players through Geyser and Floodgate (see README).
+            # sorting, world pre-generation from the admin panel, Bedrock players
+            # through Geyser and Floodgate, and tree felling (see README).
             - name: MODRINTH_PROJECTS
-              value: nbtapi:h7feK39u,prism:K6DsX6Ko,simple-voice-chat:5OqsnSs7,chestsort-plus:Dftgf7Pm,chunky:RBuKjN4k,geyser:KmriR1ju
+              value: nbtapi:h7feK39u,prism:K6DsX6Ko,simple-voice-chat:5OqsnSs7,chestsort-plus:Dftgf7Pm,chunky:RBuKjN4k,geyser:KmriR1ju,timberella:ubeGx8M9
             # Floodgate for Paper is not on Modrinth. Pinned to one build.
             - name: PLUGINS
               value: https://download.geysermc.org/v2/projects/floodgate/versions/2.2.5/builds/141/downloads/spigot

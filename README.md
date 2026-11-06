@@ -182,6 +182,28 @@ cannot be turned off for the whole server.
 The original ChestSort crashes on start on Minecraft 26.x, because it cannot read
 the new version format.
 
+## Tree felling
+
+Timberella fells a whole tree when a player crouches and breaks one of its logs with a
+stone axe or better. Without crouching, or with a wooden axe, a log breaks as normal.
+Players can turn it off for themselves with `/timberella toggle`.
+
+`manifests/tuning-patches.json` makes the axe wear by one point per log, where the
+plugin's default is half that, and turns off its automatic replanting. These apply from
+the second start after installing, because the plugin creates its settings file on the
+first. To apply them sooner, edit `plugins/Timberella/config.yml` on the data volume, which
+the plugin reloads within seconds.
+
+It only fells logs with naturally grown leaves, so log cabins are safe, including walls
+touching a tree. Prism records every log and leaf under the player's name, and a rollback
+restores them. An axe with fewer than 10 durability left cuts one log at a time. On a
+tree bigger than the axe's remaining durability, the whole tree still falls and the axe
+stops at 1 instead of breaking. A very large mangrove can leave a log behind, because of
+the plugin's size limits for each species.
+
+Tree Feller was tried first and rejected. Prism did not record its felling by default, and
+it took down same-wood walls touching a tree.
+
 ## The world
 
 The server's files live in the `server` folder of the data volume, and the world in

@@ -21,6 +21,11 @@ spec:
       port: 24454
       targetPort: voicechat
       protocol: UDP
+    # Geyser, for Bedrock players. Has its own playit tunnel (see README).
+    - name: bedrock
+      port: 19132
+      targetPort: bedrock
+      protocol: UDP
 ---
 apiVersion: apps/v1
 kind: StatefulSet
@@ -99,8 +104,10 @@ spec:
               value: "TRUE"
             - name: ENFORCE_WHITELIST
               value: "TRUE"
+            # Off because Bedrock players cannot chat while it is on. Bedrock has no
+            # signed chat, so Java players' chat is no longer signed either.
             - name: ENFORCE_SECURE_PROFILE
-              value: "TRUE"
+              value: "FALSE"
             - name: HIDE_ONLINE_PLAYERS
               value: "TRUE"
             - name: ENABLE_QUERY
@@ -137,9 +144,13 @@ spec:
             - name: SYNC_CHUNK_WRITES
               value: "FALSE"
             # Block log with undo, which needs NBT-API, optional voice chat, chest
-            # sorting, and world pre-generation from the admin panel (see README).
+            # sorting, world pre-generation from the admin panel, and Bedrock
+            # players through Geyser and Floodgate (see README).
             - name: MODRINTH_PROJECTS
-              value: nbtapi:h7feK39u,prism:K6DsX6Ko,simple-voice-chat:5OqsnSs7,chestsort-plus:Dftgf7Pm,chunky:RBuKjN4k
+              value: nbtapi:h7feK39u,prism:K6DsX6Ko,simple-voice-chat:5OqsnSs7,chestsort-plus:Dftgf7Pm,chunky:RBuKjN4k,geyser:KmriR1ju
+            # Floodgate for Paper is not on Modrinth. Pinned to one build.
+            - name: PLUGINS
+              value: https://download.geysermc.org/v2/projects/floodgate/versions/2.2.5/builds/141/downloads/spigot
             # Every connection must carry a PROXY header from the playit agent,
             # which is how the server sees real player addresses. mc-health
             # uses this to send the header itself.
@@ -156,6 +167,9 @@ spec:
               protocol: TCP
             - name: voicechat
               containerPort: 24454
+              protocol: UDP
+            - name: bedrock
+              containerPort: 19132
               protocol: UDP
           # First boot downloads Paper and generates the world.
           startupProbe:

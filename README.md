@@ -118,6 +118,30 @@ its own check. The voice server answers a small UDP ping, with no game client ne
 so sending one to the tunnel's address proves the whole path. It does not prove that
 audio works, which takes two players with the mod.
 
+## Bedrock players
+
+Geyser lets Bedrock players join, and Floodgate lets them do so without a Java account.
+They use their own tunnel and address, port `19132`, with an up-to-date Bedrock client.
+Their in-game names start with a dot, such as `.Steve`. Whitelist them with
+`fwhitelist add GAMERTAG`.
+
+In the playit dashboard, the tunnel is:
+
+- **Tunnel type:** Minecraft Bedrock (NetherNet)
+- **Region:** Europe
+- **Local address:** `10.96.25.65`, port `19132`
+- **Proxy Protocol:** None
+
+playit marks this tunnel type as experimental, and says its ports and domains may change.
+It cannot use a gateway, so it has a different address from the Java tunnel.
+
+Geyser's settings are in `plugins/Geyser-Spigot/config.yml` on the data volume, not in
+Git, because they include the tunnel's private token. Copy them from **Configuration help**
+on the tunnel's page, and restart. The console then logs
+`Registered with the external signaling service`.
+
+`enforce-secure-profile` is off, because Bedrock players cannot chat while it is on.
+
 ## Grief log
 
 Prism records who placed, broke or took what, in `plugins/prism/prism.db` on the data

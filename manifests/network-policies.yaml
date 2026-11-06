@@ -20,7 +20,7 @@ spec:
       app.kubernetes.io/name: minecraft
   policyTypes: [Ingress]
   ingress:
-    # Game and voice ports only. RCON stays on the pod's loopback.
+    # Game, voice and Bedrock ports only. RCON stays on the pod's loopback.
     - from:
         - podSelector:
             matchLabels:
@@ -28,6 +28,7 @@ spec:
       ports:
         - {protocol: TCP, port: 25565}
         - {protocol: UDP, port: 24454}
+        - {protocol: UDP, port: 19132}
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -98,6 +99,7 @@ spec:
       ports:
         - {protocol: TCP, port: 25565}
         - {protocol: UDP, port: 24454}
+        - {protocol: UDP, port: 19132}
     # playit's API and tunnel servers, over TCP and UDP on ports it chooses.
     - to:
         - ipBlock:

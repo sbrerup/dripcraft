@@ -94,6 +94,55 @@
       ]
     },
     {
+      "file": "/data/plugins/DiscordSRV/config.yml",
+      "ops": [
+        {
+          "$set": {
+            "path": "$['DiscordChatChannelConsoleCommandEnabled']",
+            "value": false,
+            "value-type": "bool"
+          }
+        },
+        {
+          "$set": {
+            "path": "$['ServerWatchdogEnabled']",
+            "value": false,
+            "value-type": "bool"
+          }
+        },
+        {
+          "$set": {
+            "path": "$['ChannelTopicUpdaterChannelTopicsAtShutdownEnabled']",
+            "value": false,
+            "value-type": "bool"
+          }
+        },
+        {
+          "$set": {
+            "path": "$['DiscordCannedResponses']",
+            "value": {}
+          }
+        }
+      ]
+    },
+    {
+      "file": "/data/plugins/DiscordSRV/messages.yml",
+      "ops": [
+        {
+          "$set": {
+            "path": "$['ChannelTopicUpdaterChatChannelTopicFormat']",
+            "value": ""
+          }
+        },
+        {
+          "$set": {
+            "path": "$['ChannelTopicUpdaterConsoleChannelTopicFormat']",
+            "value": ""
+          }
+        }
+      ]
+    },
+    {
       "file": "/data/plugins/Chunky/config.yml",
       "ops": [
         {

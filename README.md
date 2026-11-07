@@ -182,6 +182,32 @@ cannot be turned off for the whole server.
 The original ChestSort crashes on start on Minecraft 26.x, because it cannot read
 the new version format.
 
+## Discord chat
+
+DiscordSRV links Minecraft chat to one Discord channel, both ways. Joins, leaves, deaths
+and advancements also go to the channel, and the bot says when the server starts or stops.
+Typing `playerlist` in the channel lists who is online.
+
+The bot token lives only in a Secret. A missing or wrong token turns the plugin off, and
+the server starts as normal.
+
+```bash
+read -rs token && kubectl -n dripcraft-public create secret generic discord-bot \
+  --from-literal=token="$token"
+```
+
+The bot needs the Server Members and Message Content intents in the Discord developer
+portal, and View Channels, Send Messages, Embed Links and Read Message History in the
+channel. The channel ID goes under `Channels` in `plugins/DiscordSRV/config.yml` on the
+data volume, not in this public repository.
+
+`manifests/tuning-patches.json` turns off four defaults: running server commands from
+Discord with `!c`, which anyone with a role named Owner or Developer could otherwise do;
+pinging the Discord server's owner when the game stalls; rewriting the channel topic; and
+the placeholder `!ip` and `!site` answers. These apply from the second start after
+installing, because the plugin creates its settings files on the first. Until a channel is
+set, nothing is relayed, so the first start is safe.
+
 ## Tree felling
 
 Timberella fells a whole tree when a player crouches and breaks one of its logs with a

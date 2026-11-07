@@ -145,12 +145,20 @@ spec:
               value: "FALSE"
             # Block log with undo, which needs NBT-API, optional voice chat, chest
             # sorting, world pre-generation from the admin panel, Bedrock players
-            # through Geyser and Floodgate, and tree felling (see README).
+            # through Geyser and Floodgate, tree felling and Discord chat (see README).
             - name: MODRINTH_PROJECTS
-              value: nbtapi:h7feK39u,prism:K6DsX6Ko,simple-voice-chat:5OqsnSs7,chestsort-plus:Dftgf7Pm,chunky:RBuKjN4k,geyser:KmriR1ju,timberella:ubeGx8M9
+              value: nbtapi:h7feK39u,prism:K6DsX6Ko,simple-voice-chat:5OqsnSs7,chestsort-plus:Dftgf7Pm,chunky:RBuKjN4k,geyser:KmriR1ju,timberella:ubeGx8M9,discordsrv:ATlquwiT
             # Floodgate for Paper is not on Modrinth. Pinned to one build.
             - name: PLUGINS
               value: https://download.geysermc.org/v2/projects/floodgate/versions/2.2.5/builds/141/downloads/spigot
+            # Discord chat. Without this Secret the plugin turns itself off and the
+            # server starts as normal.
+            - name: DISCORDSRV_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: discord-bot
+                  key: token
+                  optional: true
             # Every connection must carry a PROXY header from the playit agent,
             # which is how the server sees real player addresses. mc-health
             # uses this to send the header itself.

@@ -13,3 +13,6 @@ configMapGenerator:
   - paper-global.yml
   - player-permissions.yml
   - tuning-patches.json
+- name: discord-status
+  files:
+  - discord-status.sh

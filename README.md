@@ -341,14 +341,15 @@ coordinate is negative, or `rcon-cli` reads it as an option. The other dimension
 `manifests/tuning-patches.json` gives renders one thread, and one more for saving images,
 where squaremap would take two of each here, and logs progress once a minute instead of
 every second. These apply from the second start after installing, because the plugin
-creates its settings file on the first, so start the first full render after the server
-has restarted once.
+creates its settings file on the first. Before then, set the same values in
+`plugins/squaremap/config.yml` on the data volume and run `squaremap reload`, which needs
+no restart.
 
-How long a full render takes here has not been measured. squaremap's own benchmark drew
-1.5 million chunks, about the size of this overworld, in 41 seconds on a 16-core desktop
-CPU with 8 threads, so expect tens of minutes to a few hours on one thread of this CPU.
-It reads the whole dimension from disk while it runs. Check `mspt` while it does, and
-pause it if tick times climb:
+On one thread, the first renders took 9 minutes each for the overworld and the Nether,
+about 1.6 million chunks each, and under 3 minutes for the mostly empty End. With two or
+three players online, tick times went from about 14 ms to between 11 and 20 ms on
+average, with single spikes up to 156 ms. Check `mspt` while a render runs, and pause it
+if tick times climb:
 
 - `squaremap pauserender minecraft:overworld` pauses, and the same command again carries on.
 - `squaremap cancelrender minecraft:overworld` stops it.
@@ -362,7 +363,8 @@ kubectl -n dripcraft-public logs minecraft-0 -c minecraft | grep squaremap | tai
 ```
 
 The tiles are in `plugins/squaremap/web/tiles` on the data volume, as images at four zoom
-levels. The backups leave them out, because a render makes them again. To delete a
+levels: about 590 MB for all three dimensions. The backups leave them out, because a
+render makes them again. To delete a
 dimension's tiles, confirm the reset in the same RCON session, because each `rcon-cli`
 command is a new one:
 

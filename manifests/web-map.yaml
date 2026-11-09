@@ -1,0 +1,122 @@
+# Caddy in front of squaremap, for the web map's playit HTTPS tunnel (see README).
+# Its own pod, so changing it never restarts the game server, and nothing that
+# faces the web shares a loopback with RCON.
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-map
+  labels:
+    app.kubernetes.io/name: web-map
+spec:
+  # The HTTPS tunnel's origin is typed into the playit dashboard, so this
+  # address must stay stable across Service re-creation.
+  clusterIP: 10.96.25.66
+  selector:
+    app.kubernetes.io/name: web-map
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+    - name: https
+      port: 8443
+      targetPort: https
+      protocol: TCP
+---
+# The certificate and Caddy's ACME account. Kept across restarts, so a new pod
+# does not ask Let's Encrypt for a new certificate, which it limits per week.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: web-map-certificates
+  labels:
+    app.kubernetes.io/name: web-map
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path-retain
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-map
+  labels:
+    app.kubernetes.io/name: web-map
+spec:
+  replicas: 1
+  # The volume can be mounted by one pod at a time.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: web-map
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: web-map
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: caddy
+          image: caddy:2.11.9-alpine@sha256:0bbb055bda6793c999bde78b1b5ce3e89f829fb031af2cf50056ea1246559fee
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: MAP_DOMAIN
+              valueFrom:
+                secretKeyRef:
+                  name: web-map
+                  key: domain
+                  optional: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: https
+              containerPort: 8443
+              protocol: TCP
+          readinessProbe:
+            tcpSocket:
+              port: https
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          volumeMounts:
+            - name: caddyfile
+              mountPath: /etc/caddy
+              readOnly: true
+            - name: certificates
+              mountPath: /data
+            - name: config
+              mountPath: /config
+      volumes:
+        - name: caddyfile
+          configMap:
+            name: web-map
+        - name: certificates
+          persistentVolumeClaim:
+            claimName: web-map-certificates
+        - name: config
+          emptyDir:
+            sizeLimit: 16Mi

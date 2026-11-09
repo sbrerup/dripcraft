@@ -1,0 +1,15 @@
+# Serves the web map over HTTPS. playit passes TLS through without ending it, so
+# Caddy gets the certificate from Let's Encrypt itself (see README).
+{
+	# Not root, so not 80 and 443. The tunnel's origin maps those to these.
+	http_port 8080
+	https_port 8443
+	admin off
+	skip_install_trust
+}
+
+# The map's address lives in the web-map Secret, not in this public repository.
+# Until the Secret exists, Caddy serves localhost only and asks for no certificate.
+{$MAP_DOMAIN:localhost} {
+	reverse_proxy minecraft:8080
+}

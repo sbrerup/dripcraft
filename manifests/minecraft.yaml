@@ -295,6 +295,44 @@ spec:
               mountPath: /backups
             - name: backup-tmp
               mountPath: /tmp
+        # Keeps a message in Discord showing whether the server is up and who is
+        # playing (see README). Posts nothing until the discord-status Secret exists.
+        - name: discord-status
+          # Already on the node, and it has rcon-cli, curl and jq.
+          image: itzg/minecraft-server:java25@sha256:e2fabc536673f8c6b343055c93f7a73e10caa79cd3368f645987593c65adf1e0
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          command: [sh, /scripts/discord-status.sh]
+          env:
+            - name: RCON_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: minecraft-rcon
+                  key: password
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
+          volumeMounts:
+            # The message's ID is kept here, so a restart edits the same message.
+            - name: data
+              mountPath: /data
+              subPath: server
+            - name: discord-status
+              mountPath: /scripts
+              readOnly: true
+            # Not a subPath, so a new or changed Secret reaches the container
+            # without restarting the server.
+            - name: discord-webhook
+              mountPath: /run/discord-status
+              readOnly: true
       volumes:
         - name: paper-config
           configMap:
@@ -305,6 +343,13 @@ spec:
         - name: backup-tmp
           emptyDir:
             sizeLimit: 256Mi
+        - name: discord-status
+          configMap:
+            name: discord-status
+        - name: discord-webhook
+          secret:
+            secretName: discord-status
+            optional: true
   # Separate volumes rather than subPaths: local-path volumes ignore fsGroup,
   # and these restricted pods have no root init container to fix ownership.
   volumeClaimTemplates:

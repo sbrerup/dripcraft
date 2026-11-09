@@ -208,6 +208,55 @@ the placeholder `!ip` and `!site` answers. These apply from the second start aft
 installing, because the plugin creates its settings files on the first. Until a channel is
 set, nothing is relayed, so the first start is safe.
 
+## Live status in Discord
+
+One message in a Discord channel shows whether the server is up and who is playing, and is
+edited every minute. It is green with the players' names when the server answers, yellow
+while it starts, and red while it stops or restarts. It ends with when it was last updated,
+so a message that has stopped changing shows its age. That happens when the whole pod, the
+node or the home connection is down.
+
+It shows what the server sees, not the tunnel. During a playit outage it stays green with
+the players still connected, while nobody new can join. Yellow also shows when the server
+stops answering without stopping.
+
+It names the players, which the public server list hides, so post it only where players can
+see it.
+
+The `discord-status` container beside the server runs `manifests/discord-status.sh`. It reads
+the player list over RCON and edits the message through a Discord webhook. DiscordSRV ignores
+webhook messages, so the message does not reach Minecraft chat.
+
+To set it up, create a webhook in the channel (**Edit Channel**, **Integrations**,
+**Webhooks**, **New Webhook**), give it a name and an icon, and copy its URL. Then put the
+URL in a Secret:
+
+```bash
+read -rs url && kubectl -n dripcraft-public create secret generic discord-status \
+  --from-literal=webhook-url="$url"
+```
+
+The container reads the Secret every minute, so this needs no restart. It posts the message,
+then keeps editing it. Pin the message, or give it a channel of its own, so chat does not push
+it out of view.
+
+The message's ID is kept in `discord-status-message-id` in the server's folder, so after a
+restart the same message is edited. If the message is deleted, a new one is posted. To move it
+to another channel, replace the Secret with that channel's webhook and delete the old message:
+
+```bash
+read -rs url && kubectl -n dripcraft-public create secret generic discord-status \
+  --from-literal=webhook-url="$url" --dry-run=client -o yaml | kubectl apply -f -
+```
+
+The container must keep running. If it stops, the pod becomes unready and the tunnel stops
+sending players to the server, so the script never exits on an error from Discord or the
+server. Check what it is doing with:
+
+```bash
+kubectl -n dripcraft-public logs minecraft-0 -c discord-status
+```
+
 ## Tree felling
 
 Timberella fells a whole tree when a player crouches and breaks one of its logs with a
@@ -315,7 +364,7 @@ up. Instead, unpack the archive into a new folder and point the server at it:
    `restored-20261106`. The pod must run as uid 1000, so the server can write there.
    Archives hold the contents of the server's folder, so unpack them inside the new
    folder rather than over the top of the volume.
-2. In a commit, change `subPath: server` to the new folder in both containers. The
+2. In a commit, change `subPath: server` to the new folder in all three containers. The
    server restarts into the restored files, and the image downloads the jars that
    periodic archives leave out.
 3. The old folder stays on the volume until you remove it.

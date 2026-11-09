@@ -22,9 +22,11 @@ class DripcraftPublicTests(unittest.TestCase):
         cls.agent = cls.objects[("Deployment", "playit-agent")]["spec"]["template"]["spec"]
         cls.uptime = cls.objects[("CronJob", "uptime-check")]["spec"]["jobTemplate"]["spec"]["template"]["spec"]
 
+    def container(self, name):
+        return next(c for c in self.server["containers"] if c["name"] == name)
+
     def env(self, container="minecraft"):
-        spec = next(c for c in self.server["containers"] if c["name"] == container)
-        return {e["name"]: e for e in spec["env"]}
+        return {e["name"]: e for e in self.container(container)["env"]}
 
     def egress(self, policy):
         return self.objects[("NetworkPolicy", policy)]["spec"]["egress"]
@@ -106,7 +108,7 @@ class DripcraftPublicTests(unittest.TestCase):
         self.assertRegex(self.env()["PLUGINS"]["value"], r"/projects/floodgate/versions/[\d.]+/builds/\d+/downloads/spigot$")
 
     def test_secrets_are_referenced_not_inlined(self):
-        for container in ("minecraft", "backup"):
+        for container in ("minecraft", "backup", "discord-status"):
             self.assertIn("secretKeyRef", self.env(container)["RCON_PASSWORD"]["valueFrom"])
         self.assertEqual(
             next(v for v in self.agent["volumes"] if v["name"] == "secret")["secret"]["secretName"],
@@ -186,11 +188,32 @@ class DripcraftPublicTests(unittest.TestCase):
         ports = {p["name"]: (p["protocol"], p["containerPort"]) for p in server["ports"]}
         self.assertEqual(ports["voicechat"], ("UDP", 24454))
 
-    def test_server_and_backups_use_the_same_folder(self):
-        for name in ("minecraft", "backup"):
-            container = next(c for c in self.server["containers"] if c["name"] == name)
-            mount = next(m for m in container["volumeMounts"] if m["name"] == "data")
+    def test_server_backups_and_discord_status_use_the_same_folder(self):
+        # The Discord status keeps its message's ID there, so a restart edits the same message.
+        for name in ("minecraft", "backup", "discord-status"):
+            mount = next(m for m in self.container(name)["volumeMounts"] if m["name"] == "data")
             self.assertEqual((mount["mountPath"], mount["subPath"]), ("/data", "server"), name)
+
+    def test_discord_status_script_is_mounted_where_it_is_run(self):
+        container = self.container("discord-status")
+        script = pathlib.PurePosixPath(container["command"][-1])
+        mount = next(m for m in container["volumeMounts"] if m["mountPath"] == str(script.parent))
+        volume = next(v for v in self.server["volumes"] if v["name"] == mount["name"])
+        self.assertIn(script.name, self.objects[("ConfigMap", volume["configMap"]["name"])]["data"])
+
+    def test_discord_webhook_comes_from_an_optional_secret_volume(self):
+        # A volume that is not a subPath, rather than an environment variable, so a new
+        # or changed webhook reaches the container without restarting the server.
+        volume = next(v for v in self.server["volumes"] if v["name"] == "discord-webhook")
+        self.assertEqual(volume["secret"], {"secretName": "discord-status", "optional": True})
+        mount = next(m for m in self.container("discord-status")["volumeMounts"] if m["name"] == "discord-webhook")
+        self.assertNotIn("subPath", mount)
+        script = (ROOT / "manifests" / "discord-status.sh").read_text()
+        self.assertIn(f"{mount['mountPath']}/webhook-url", script)
+
+    def test_discord_status_never_pings_anyone(self):
+        script = (ROOT / "manifests" / "discord-status.sh").read_text()
+        self.assertIn("allowed_mentions: {parse: []}", script)
 
     def test_egress_never_reaches_private_networks(self):
         for policy in ("minecraft-egress", "playit-agent-egress", "uptime-check-egress"):

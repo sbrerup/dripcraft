@@ -282,29 +282,31 @@ it took down same-wood walls touching a tree.
 
 ## Web map
 
-squaremap draws the world from above as a map in the browser, at the address of a playit
-HTTPS tunnel. It shows the terrain and everything built on it, the spawn point, the world
-border and where each player is, updated every second. Anyone with the address can see
-every base and follow players around, so share it only with the players. A player is left
-off the map while invisible, in spectator mode or wearing a carved pumpkin.
+squaremap draws the world from above as a map in the browser, at the game's own address
+with `https://` in front. It shows the terrain and everything built on it, the spawn
+point, the world border and where each player is, updated every second. Anyone who knows
+the server's address can see every base and follow players around. A player is left off
+the map while invisible, in spectator mode or wearing a carved pumpkin.
 
 playit passes HTTPS through without ending it, so Caddy in the `web-map` pod gets the
 certificate from Let's Encrypt itself and keeps it on its own small volume. The proxy has
 its own pod, so changing it never restarts the server, and the server's map port, 8080,
 takes connections from that pod only.
 
-In the playit dashboard, add an HTTPS tunnel to this agent:
+In the playit dashboard, the tunnel is:
 
-- **Tunnel type:** HTTPS (needs Premium)
-- **Domain:** one of the account's `.playit.plus` domains, or your own, set up as in
-  playit's [HTTPS tunnel guide](https://playit.gg/support/https-tunnel/)
-- **Region:** Europe
-- **Origin:** local address `10.96.25.66` (the fixed ClusterIP in
-  `manifests/web-map.yaml`), HTTP port `8080`, HTTPS port `8443`
+- **Tunnel Type:** HTTPs (needs Premium)
+- **Public Endpoint:** the gateway the Minecraft Java tunnel uses, under **Gateways**. The
+  two tunnels share its domain, and the region comes from the gateway.
+- **Agent:** this agent. While the list loads, it may say the gateway endpoint is not
+  supported, and then it becomes selectable.
+- **Origin Config:** Local IP `10.96.25.66` (the fixed ClusterIP in
+  `manifests/web-map.yaml`), Http Port `8080`, Https Port `8443`
 - **Proxy Protocol:** None
 
-playit's guide says to leave the origin at its defaults, `127.0.0.1` with ports 80 and
-443. Here that is the agent's own pod, where nothing listens, so set it as above.
+The origin fields start filled in with `127.0.0.1` and ports 80 and 443, as playit's
+[HTTPS tunnel guide](https://playit.gg/support/https-tunnel/) expects. Here that is the
+agent's own pod, where nothing listens, so replace them as above.
 
 Then put the tunnel's domain in a Secret and restart the proxy so Caddy reads it. Until
 the Secret exists, Caddy answers only for `localhost` and asks for no certificate.
@@ -339,14 +341,15 @@ coordinate is negative, or `rcon-cli` reads it as an option. The other dimension
 `manifests/tuning-patches.json` gives renders one thread, and one more for saving images,
 where squaremap would take two of each here, and logs progress once a minute instead of
 every second. These apply from the second start after installing, because the plugin
-creates its settings file on the first, so start the first full render after the server
-has restarted once.
+creates its settings file on the first. Before then, set the same values in
+`plugins/squaremap/config.yml` on the data volume and run `squaremap reload`, which needs
+no restart.
 
-How long a full render takes here has not been measured. squaremap's own benchmark drew
-1.5 million chunks, about the size of this overworld, in 41 seconds on a 16-core desktop
-CPU with 8 threads, so expect tens of minutes to a few hours on one thread of this CPU.
-It reads the whole dimension from disk while it runs. Check `mspt` while it does, and
-pause it if tick times climb:
+On one thread, the first renders took 9 minutes each for the overworld and the Nether,
+about 1.6 million chunks each, and under 3 minutes for the mostly empty End. With two or
+three players online, tick times went from about 14 ms to between 11 and 20 ms on
+average, with single spikes up to 156 ms. Check `mspt` while a render runs, and pause it
+if tick times climb:
 
 - `squaremap pauserender minecraft:overworld` pauses, and the same command again carries on.
 - `squaremap cancelrender minecraft:overworld` stops it.
@@ -360,7 +363,8 @@ kubectl -n dripcraft-public logs minecraft-0 -c minecraft | grep squaremap | tai
 ```
 
 The tiles are in `plugins/squaremap/web/tiles` on the data volume, as images at four zoom
-levels. The backups leave them out, because a render makes them again. To delete a
+levels: about 590 MB for all three dimensions. The backups leave them out, because a
+render makes them again. To delete a
 dimension's tiles, confirm the reset in the same RCON session, because each `rcon-cli`
 command is a new one:
 

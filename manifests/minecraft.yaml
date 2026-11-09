@@ -26,6 +26,12 @@ spec:
       port: 19132
       targetPort: bedrock
       protocol: UDP
+    # squaremap's web server. Only the web-map proxy reaches it, and the proxy
+    # has the HTTPS tunnel (see README and web-map.yaml).
+    - name: map
+      port: 8080
+      targetPort: map
+      protocol: TCP
 ---
 apiVersion: apps/v1
 kind: StatefulSet
@@ -145,9 +151,10 @@ spec:
               value: "FALSE"
             # Block log with undo, which needs NBT-API, optional voice chat, chest
             # sorting, world pre-generation from the admin panel, Bedrock players
-            # through Geyser and Floodgate, tree felling and Discord chat (see README).
+            # through Geyser and Floodgate, tree felling, Discord chat and the web
+            # map (see README).
             - name: MODRINTH_PROJECTS
-              value: nbtapi:h7feK39u,prism:K6DsX6Ko,simple-voice-chat:5OqsnSs7,chestsort-plus:Dftgf7Pm,chunky:RBuKjN4k,geyser:KmriR1ju,timberella:ubeGx8M9,discordsrv:ATlquwiT
+              value: nbtapi:h7feK39u,prism:K6DsX6Ko,simple-voice-chat:5OqsnSs7,chestsort-plus:Dftgf7Pm,chunky:RBuKjN4k,geyser:KmriR1ju,timberella:ubeGx8M9,discordsrv:ATlquwiT,squaremap:6wmZVQBO
             # Floodgate for Paper is not on Modrinth. Pinned to one build.
             - name: PLUGINS
               value: https://download.geysermc.org/v2/projects/floodgate/versions/2.2.5/builds/141/downloads/spigot
@@ -179,6 +186,9 @@ spec:
             - name: bedrock
               containerPort: 19132
               protocol: UDP
+            - name: map
+              containerPort: 8080
+              protocol: TCP
           # First boot downloads Paper and generates the world.
           startupProbe:
             exec:
@@ -269,8 +279,9 @@ spec:
               value: /data
             - name: DEST_DIR
               value: /backups
+            # The web map's tiles can be rendered again from the world.
             - name: EXCLUDES
-              value: "*.jar,cache,logs,libraries,versions"
+              value: "*.jar,cache,logs,libraries,versions,plugins/squaremap/web/tiles"
             - name: RCON_HOST
               value: localhost
             - name: RCON_PORT

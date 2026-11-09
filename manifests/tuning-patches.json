@@ -160,6 +160,46 @@
           }
         }
       ]
+    },
+    {
+      "file": "/data/plugins/squaremap/config.yml",
+      "ops": [
+        {
+          "$set": {
+            "path": "$['world-settings']['default']['map']['render']['full']['workers']",
+            "value": 1,
+            "value-type": "int"
+          }
+        },
+        {
+          "$set": {
+            "path": "$['world-settings']['default']['map']['render']['radius']['workers']",
+            "value": 1,
+            "value-type": "int"
+          }
+        },
+        {
+          "$set": {
+            "path": "$['world-settings']['default']['map']['render']['background']['workers']",
+            "value": 1,
+            "value-type": "int"
+          }
+        },
+        {
+          "$set": {
+            "path": "$['world-settings']['default']['map']['image-saving']['workers']",
+            "value": 1,
+            "value-type": "int"
+          }
+        },
+        {
+          "$set": {
+            "path": "$['settings']['render-progress-logging']['interval-seconds']",
+            "value": 60,
+            "value-type": "int"
+          }
+        }
+      ]
     }
   ]
 }

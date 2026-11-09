@@ -19,11 +19,12 @@ or the tailnet, and players never see the home IP address.
 
 ```text
 player -> playit edge -> playit-agent pod -> minecraft pod (Paper + backup sidecar)
+browser -> playit edge -> playit-agent pod -> web-map pod (Caddy) -> minecraft pod (web map)
 ```
 
 Network policy limits the server to HTTPS and DNS, and the agent to DNS, the
-public internet and the server's game and voice ports. Neither can reach the LAN,
-the tailnet or the rest of the cluster.
+public internet, the server's game and voice ports and the web map's proxy. None of
+them can reach the LAN, the tailnet or the rest of the cluster.
 
 ## Setup
 
@@ -279,6 +280,99 @@ the plugin's size limits for each species.
 Tree Feller was tried first and rejected. Prism did not record its felling by default, and
 it took down same-wood walls touching a tree.
 
+## Web map
+
+squaremap draws the world from above as a map in the browser, at the address of a playit
+HTTPS tunnel. It shows the terrain and everything built on it, the spawn point, the world
+border and where each player is, updated every second. Anyone with the address can see
+every base and follow players around, so share it only with the players. A player is left
+off the map while invisible, in spectator mode or wearing a carved pumpkin.
+
+playit passes HTTPS through without ending it, so Caddy in the `web-map` pod gets the
+certificate from Let's Encrypt itself and keeps it on its own small volume. The proxy has
+its own pod, so changing it never restarts the server, and the server's map port, 8080,
+takes connections from that pod only.
+
+In the playit dashboard, add an HTTPS tunnel to this agent:
+
+- **Tunnel type:** HTTPS (needs Premium)
+- **Domain:** one of the account's `.playit.plus` domains, or your own, set up as in
+  playit's [HTTPS tunnel guide](https://playit.gg/support/https-tunnel/)
+- **Region:** Europe
+- **Origin:** local address `10.96.25.66` (the fixed ClusterIP in
+  `manifests/web-map.yaml`), HTTP port `8080`, HTTPS port `8443`
+- **Proxy Protocol:** None
+
+playit's guide says to leave the origin at its defaults, `127.0.0.1` with ports 80 and
+443. Here that is the agent's own pod, where nothing listens, so set it as above.
+
+Then put the tunnel's domain in a Secret and restart the proxy so Caddy reads it. Until
+the Secret exists, Caddy answers only for `localhost` and asks for no certificate.
+
+```bash
+kubectl -n dripcraft-public create secret generic web-map --from-literal=domain=MAP_DOMAIN
+kubectl -n dripcraft-public delete pod -l app.kubernetes.io/name=web-map
+```
+
+Caddy asks for the certificate as soon as it starts, and Let's Encrypt checks the domain
+through the tunnel, so create the tunnel first. Caddy keeps retrying if it fails. Its log
+shows `certificate obtained successfully`:
+
+```bash
+kubectl -n dripcraft-public logs deploy/web-map
+```
+
+### Rendering
+
+Nothing large renders on its own. squaremap draws chunks as they change, and the rest of
+the pre-generated world only when an operator starts a render. Start with the overworld:
+
+```bash
+kubectl -n dripcraft-public exec minecraft-0 -c minecraft -- rcon-cli squaremap fullrender minecraft:overworld
+```
+
+`squaremap radiusrender minecraft:overworld 3000` renders 3,000 blocks around spawn
+instead, and `X Z` after the radius moves the centre. Put `--` after `rcon-cli` when a
+coordinate is negative, or `rcon-cli` reads it as an option. The other dimensions are
+`minecraft:the_nether` and `minecraft:the_end`.
+
+`manifests/tuning-patches.json` gives renders one thread, and one more for saving images,
+where squaremap would take two of each here, and logs progress once a minute instead of
+every second. These apply from the second start after installing, because the plugin
+creates its settings file on the first, so start the first full render after the server
+has restarted once.
+
+How long a full render takes here has not been measured. squaremap's own benchmark drew
+1.5 million chunks, about the size of this overworld, in 41 seconds on a 16-core desktop
+CPU with 8 threads, so expect tens of minutes to a few hours on one thread of this CPU.
+It reads the whole dimension from disk while it runs. Check `mspt` while it does, and
+pause it if tick times climb:
+
+- `squaremap pauserender minecraft:overworld` pauses, and the same command again carries on.
+- `squaremap cancelrender minecraft:overworld` stops it.
+- A render's progress is saved, so a restart resumes it, a paused one included. Pause it
+  again afterwards.
+
+Progress appears in the server log once a minute:
+
+```bash
+kubectl -n dripcraft-public logs minecraft-0 -c minecraft | grep squaremap | tail
+```
+
+The tiles are in `plugins/squaremap/web/tiles` on the data volume, as images at four zoom
+levels. The backups leave them out, because a render makes them again. To delete a
+dimension's tiles, confirm the reset in the same RCON session, because each `rcon-cli`
+command is a new one:
+
+```bash
+printf 'squaremap resetmap minecraft:overworld\nsquaremap confirm\n' | \
+  kubectl -n dripcraft-public exec -i minecraft-0 -c minecraft -- rcon-cli
+```
+
+BlueMap was considered and rejected. Its 3D tiles would take about 25 GB for the
+overworld alone, it renders every world as soon as it starts, and the image cannot patch
+its settings files. Pl3xMap has only beta builds for 26.x, and Dynmap has none.
+
 ## The world
 
 The server's files live in the `server` folder of the data volume, and the world in
@@ -352,7 +446,8 @@ still shared, and exclusive cores would need a change to the node's own configur
 The `backup` sidecar writes `/backups/world-*.tar.gz` every 6 hours and keeps 2 days.
 It pauses any running pre-generation while it does, because tar reports a failed backup
 if the world changes underneath it, and resumes only what it paused. Plugin and server
-jars are left out, because the image downloads them again on start. These archives are
+jars are left out, because the image downloads them again on start, and so are the web
+map's tiles, because a render makes them again. These archives are
 on the same disk as the world, and whether the nightly labmox VM backup covers this
 volume has not been checked.
 

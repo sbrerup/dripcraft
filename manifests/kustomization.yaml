@@ -6,6 +6,7 @@ resources:
 - minecraft.yaml
 - playit.yaml
 - uptime-check.yaml
+- web-map.yaml
 - network-policies.yaml
 configMapGenerator:
 - name: paper-config
@@ -16,3 +17,6 @@ configMapGenerator:
 - name: discord-status
   files:
   - discord-status.sh
+- name: web-map
+  files:
+  - Caddyfile

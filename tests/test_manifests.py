@@ -21,6 +21,9 @@ class DripcraftPublicTests(unittest.TestCase):
         cls.server = cls.objects[("StatefulSet", "minecraft")]["spec"]["template"]["spec"]
         cls.agent = cls.objects[("Deployment", "playit-agent")]["spec"]["template"]["spec"]
         cls.uptime = cls.objects[("CronJob", "uptime-check")]["spec"]["jobTemplate"]["spec"]["template"]["spec"]
+        cls.web_map = cls.objects[("Deployment", "web-map")]["spec"]["template"]["spec"]
+        cls.patches = json.loads((ROOT / "manifests" / "tuning-patches.json").read_text())["patches"]
+        cls.caddyfile = (ROOT / "manifests" / "Caddyfile").read_text()
 
     def container(self, name):
         return next(c for c in self.server["containers"] if c["name"] == name)
@@ -40,7 +43,7 @@ class DripcraftPublicTests(unittest.TestCase):
         self.assertEqual(labels["pod-security.kubernetes.io/enforce"], "restricted")
 
     def test_pods_are_locked_down(self):
-        for pod in (self.server, self.agent, self.uptime):
+        for pod in (self.server, self.agent, self.uptime, self.web_map):
             self.assertIs(pod["automountServiceAccountToken"], False)
             self.assertIs(pod["securityContext"]["runAsNonRoot"], True)
             self.assertEqual(pod["securityContext"]["seccompProfile"]["type"], "RuntimeDefault")
@@ -49,9 +52,10 @@ class DripcraftPublicTests(unittest.TestCase):
                 self.assertIs(context["allowPrivilegeEscalation"], False)
                 self.assertIs(context["readOnlyRootFilesystem"], True)
                 self.assertEqual(context["capabilities"]["drop"], ["ALL"])
+                self.assertNotIn("add", context["capabilities"])
 
     def test_images_are_pinned_by_digest(self):
-        for pod in (self.server, self.agent, self.uptime):
+        for pod in (self.server, self.agent, self.uptime, self.web_map):
             for container in pod["containers"]:
                 self.assertRegex(container["image"], r":[\w.-]+@sha256:[0-9a-f]{64}$")
 
@@ -151,29 +155,104 @@ class DripcraftPublicTests(unittest.TestCase):
         self.assertEqual(service.get("type", "ClusterIP"), "ClusterIP")
         self.assertEqual(
             [(p["protocol"], p["port"]) for p in service["ports"]],
-            [("TCP", 25565), ("UDP", 24454), ("UDP", 19132)],
+            [("TCP", 25565), ("UDP", 24454), ("UDP", 19132), ("TCP", 8080)],
         )
+
+    def test_web_map_tunnel_origin_is_a_fixed_address(self):
+        service = self.objects[("Service", "web-map")]["spec"]
+        self.assertEqual(service["clusterIP"], "10.96.25.66")
+        self.assertEqual(service.get("type", "ClusterIP"), "ClusterIP")
+        self.assertEqual(
+            [(p["protocol"], p["port"]) for p in service["ports"]],
+            [("TCP", 8080), ("TCP", 8443)],
+        )
+
+    def test_caddy_listens_where_the_tunnel_and_service_send_traffic(self):
+        ports = {p["name"]: p["containerPort"] for p in self.web_map["containers"][0]["ports"]}
+        self.assertIn(f"http_port {ports['http']}", self.caddyfile)
+        self.assertIn(f"https_port {ports['https']}", self.caddyfile)
+
+    def test_caddy_proxies_to_the_servers_map_port(self):
+        server = {p["name"]: p["containerPort"] for p in self.container("minecraft")["ports"]}
+        self.assertIn(f"reverse_proxy minecraft:{server['map']}", self.caddyfile)
+        service = self.objects[("Service", "minecraft")]["spec"]["ports"]
+        self.assertIn({"name": "map", "port": server["map"], "targetPort": "map", "protocol": "TCP"}, service)
+
+    def test_map_domain_stays_out_of_git(self):
+        env = {e["name"]: e for e in self.web_map["containers"][0]["env"]}
+        ref = env["MAP_DOMAIN"]["valueFrom"]["secretKeyRef"]
+        self.assertEqual((ref["name"], ref["key"]), ("web-map", "domain"))
+        self.assertIs(ref["optional"], True)
+        self.assertIn("{$MAP_DOMAIN:localhost} {", self.caddyfile)
+
+    def test_map_certificates_survive_restarts(self):
+        # Let's Encrypt limits new certificates for the same name to a few a week.
+        caddy = self.web_map["containers"][0]
+        mount = next(m for m in caddy["volumeMounts"] if m["mountPath"] == "/data")
+        volume = next(v for v in self.web_map["volumes"] if v["name"] == mount["name"])
+        claim = self.objects[("PersistentVolumeClaim", volume["persistentVolumeClaim"]["claimName"])]
+        self.assertIn("Prune=false", claim["metadata"]["annotations"]["argocd.argoproj.io/sync-options"])
+        deployment = self.objects[("Deployment", "web-map")]["spec"]
+        self.assertEqual(deployment["strategy"]["type"], "Recreate")
+
+    def test_caddyfile_is_mounted_where_caddy_reads_it(self):
+        caddy = self.web_map["containers"][0]
+        mount = next(m for m in caddy["volumeMounts"] if m["mountPath"] == "/etc/caddy")
+        volume = next(v for v in self.web_map["volumes"] if v["name"] == mount["name"])
+        self.assertIn("Caddyfile", self.objects[("ConfigMap", volume["configMap"]["name"])]["data"])
+
+    def test_map_renders_with_one_thread(self):
+        patch = next(p for p in self.patches if p["file"] == "/data/plugins/squaremap/config.yml")
+        ops = {op["$set"]["path"]: op["$set"]["value"] for op in patch["ops"]}
+        default = "$['world-settings']['default']['map']"
+        for mode in ("full", "radius", "background"):
+            self.assertEqual(ops[f"{default}['render']['{mode}']['workers']"], 1, mode)
+        self.assertEqual(ops[f"{default}['image-saving']['workers']"], 1)
+
+    def test_map_tiles_stay_out_of_backups(self):
+        excludes = self.env("backup")["EXCLUDES"]["value"].split(",")
+        self.assertIn("plugins/squaremap/web/tiles", excludes)
 
     def test_default_deny_both_ways(self):
         spec = self.objects[("NetworkPolicy", "default-deny")]["spec"]
         self.assertEqual(spec["podSelector"], {})
         self.assertEqual(set(spec["policyTypes"]), {"Ingress", "Egress"})
 
-    def test_only_the_agent_reaches_only_the_public_ports(self):
-        rules = self.objects[("NetworkPolicy", "minecraft-ingress")]["spec"]["ingress"]
-        self.assertEqual(len(rules), 1)
-        self.assertEqual(
-            rules[0]["ports"],
-            [
+    def ingress_by_source(self, policy):
+        rules = self.objects[("NetworkPolicy", policy)]["spec"]["ingress"]
+        for rule in rules:
+            self.assertEqual(list(rule["from"][0]), ["podSelector"], policy)
+            self.assertEqual(len(rule["from"]), 1, policy)
+        return {r["from"][0]["podSelector"]["matchLabels"]["app.kubernetes.io/name"]: r["ports"] for r in rules}
+
+    def test_only_the_agent_and_the_map_proxy_reach_the_server(self):
+        self.assertEqual(self.ingress_by_source("minecraft-ingress"), {
+            "playit-agent": [
                 {"protocol": "TCP", "port": 25565},
                 {"protocol": "UDP", "port": 24454},
                 {"protocol": "UDP", "port": 19132},
             ],
+            "web-map": [{"protocol": "TCP", "port": 8080}],
+        })
+
+    def test_only_the_agent_reaches_the_map_proxy(self):
+        self.assertEqual(self.ingress_by_source("web-map-ingress"), {
+            "playit-agent": [{"protocol": "TCP", "port": 8080}, {"protocol": "TCP", "port": 8443}],
+        })
+
+    def test_agent_can_reach_the_map_proxy(self):
+        rule = next(
+            r for r in self.egress("playit-agent-egress")
+            if r["to"][0].get("podSelector", {}).get("matchLabels", {}).get("app.kubernetes.io/name") == "web-map"
         )
-        self.assertEqual(
-            rules[0]["from"],
-            [{"podSelector": {"matchLabels": {"app.kubernetes.io/name": "playit-agent"}}}],
-        )
+        self.assertEqual(rule["ports"], [{"protocol": "TCP", "port": 8080}, {"protocol": "TCP", "port": 8443}])
+
+    def test_map_proxy_egress_is_the_map_and_https_only(self):
+        rules = self.egress("web-map-egress")
+        server = next(r for r in rules if r["to"][0].get("podSelector", {}).get("matchLabels", {}).get("app.kubernetes.io/name") == "minecraft")
+        self.assertEqual(server["ports"], [{"protocol": "TCP", "port": 8080}])
+        internet = next(r for r in rules if "ipBlock" in r["to"][0])
+        self.assertEqual(internet["ports"], [{"protocol": "TCP", "port": 443}])
 
     def test_agent_can_reach_the_voice_and_bedrock_ports(self):
         rule = next(
@@ -216,7 +295,7 @@ class DripcraftPublicTests(unittest.TestCase):
         self.assertIn("allowed_mentions: {parse: []}", script)
 
     def test_egress_never_reaches_private_networks(self):
-        for policy in ("minecraft-egress", "playit-agent-egress", "uptime-check-egress"):
+        for policy in ("minecraft-egress", "playit-agent-egress", "uptime-check-egress", "web-map-egress"):
             blocks = [p["ipBlock"] for rule in self.egress(policy) for p in rule["to"] if "ipBlock" in p]
             self.assertEqual(len(blocks), 1, policy)
             self.assertEqual(blocks[0]["cidr"], "0.0.0.0/0")
@@ -239,7 +318,7 @@ class DripcraftPublicTests(unittest.TestCase):
 
     def test_only_approved_plugins_are_installed(self):
         projects = dict(item.split(":") for item in self.env()["MODRINTH_PROJECTS"]["value"].split(","))
-        self.assertEqual({"nbtapi", "prism", "simple-voice-chat", "chestsort-plus", "chunky", "geyser", "timberella", "discordsrv"}, set(projects))
+        self.assertEqual({"nbtapi", "prism", "simple-voice-chat", "chestsort-plus", "chunky", "geyser", "timberella", "discordsrv", "squaremap"}, set(projects))
 
     def test_pre_generation_continues_after_a_restart(self):
         patches = json.loads((ROOT / "manifests" / "tuning-patches.json").read_text())["patches"]

@@ -6,7 +6,7 @@
         {
           "$set": {
             "path": "$['world-settings']['default']['mob-spawn-range']",
-            "value": 6,
+            "value": 8,
             "value-type": "int"
           }
         }

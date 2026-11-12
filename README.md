@@ -19,12 +19,17 @@ or the tailnet, and players never see the home IP address.
 
 ```text
 player -> playit edge -> playit-agent pod -> minecraft pod (Paper + backup sidecar)
+player -> playit edge -> playit-agent pod -> minecraft-creative pod (Paper + backup sidecar)
 browser -> playit edge -> playit-agent pod -> web-map pod (Caddy) -> minecraft pod (web map)
 ```
 
-Network policy limits the server to HTTPS and DNS, and the agent to DNS, the
-public internet, the server's game and voice ports and the web map's proxy. None of
-them can reach the LAN, the tailnet or the rest of the cluster.
+Network policy limits both servers to HTTPS and DNS, and the agent to DNS, the
+public internet, the servers' game and voice ports and the web map's proxy. None of
+them can reach the LAN, the tailnet or the rest of the cluster, and the two servers
+cannot reach each other.
+
+Most of this page is about the survival server. The second one is described under
+[Creative server](#creative-server).
 
 ## Setup
 
@@ -90,6 +95,107 @@ kubectl -n dripcraft-public exec minecraft-0 -c minecraft -- rcon-cli mspt
 A restart announces itself in chat, then waits 60 seconds before stopping, so
 players are not dropped without warning. Merging a change that restarts the server
 therefore takes about a minute longer.
+
+## Creative server
+
+A second, smaller Paper server with a flat world, where every player is in creative
+mode. It is a separate server rather than a second world on the survival server, so
+nothing made there can be carried into the survival world, and nobody teleports between
+the two. Players join it at its own address, as a second entry in their server list.
+
+It runs as the `minecraft-creative-0` pod from `manifests/creative.yaml`, with its own
+volumes, whitelist, operators and backups. The world is one layer of grass on dirt and
+bedrock, with no villages and no monsters. It runs the same Paper build as the survival
+server, with Geyser, Floodgate and DiscordSRV only, and the same redstone setting, so a
+contraption behaves the same on both. It has no voice chat, web map, grief log or
+pre-generation.
+
+Run commands on it the same way, with its pod's name:
+
+```bash
+kubectl -n dripcraft-public exec minecraft-creative-0 -c minecraft -- rcon-cli list
+```
+
+### Setting it up
+
+It starts without any setup, using the `minecraft-rcon` Secret the survival server already
+has, but nobody can join until it has a tunnel and a whitelist.
+
+In the playit dashboard, add a second Minecraft Java tunnel to the same agent:
+
+- **Region:** Europe
+- **Local address:** `10.96.25.67`, port `25565` (the fixed ClusterIP in
+  `manifests/creative.yaml`)
+- **Proxy Protocol:** Version 2
+
+Bedrock players need a tunnel of their own to this server too: a Minecraft Bedrock
+(NetherNet) tunnel to `10.96.25.67`, port `19132`, set up as under
+[Bedrock players](#bedrock-players). Each tunnel has its own token, which goes in this
+server's `plugins/Geyser-Spigot/config.yml`.
+
+The whitelist is this server's own. Add names one at a time as on the survival server, or
+copy the survival server's whole whitelist across, Bedrock players included. Run it again
+after adding someone to the survival server:
+
+```bash
+kubectl -n dripcraft-public exec minecraft-0 -c minecraft -- cat /data/whitelist.json | \
+  kubectl -n dripcraft-public exec -i minecraft-creative-0 -c minecraft -- \
+  sh -c 'cat > /data/whitelist.json && rcon-cli whitelist reload'
+```
+
+### Chat between the two servers
+
+Both servers run DiscordSRV. When each has its own bot and both are set to the same
+Discord channel, what a player says on one server is posted to the channel by that
+server's bot, and the other server shows it in game chat as a message from Discord. The
+bot's name is what players see in front of those lines, so name each bot after its
+server. This has not been tried yet, so check how it looks before telling players.
+
+It must be a second bot, because a server ignores messages its own bot posted. Create
+another application in the Discord developer portal, with the intents and channel
+permissions listed under [Discord chat](#discord-chat), and give its token to this
+server:
+
+```bash
+read -rs token && kubectl -n dripcraft-public create secret generic discord-bot-creative \
+  --from-literal=token="$token"
+kubectl -n dripcraft-public delete pod minecraft-creative-0
+```
+
+Then put the channel's ID under `Channels` in this server's
+`plugins/DiscordSRV/config.yml` and restart it again. `manifests/creative-tuning-patches.json`
+turns off the same four defaults as on the survival server.
+
+Joins, leaves, deaths and advancements are posted to Discord by each server, and are not
+expected to appear in the other server's game chat. Chat between the servers goes through
+Discord, so it stops while Discord is down.
+
+### Live status in Discord
+
+This server can keep its own status message, as under
+[Live status in Discord](#live-status-in-discord). It reads its webhook from a Secret
+named `discord-status-creative`, and posts nothing until that exists. Give it the same
+webhook URL as the survival server's to have both messages in one channel:
+
+```bash
+read -rs url && kubectl -n dripcraft-public create secret generic discord-status-creative \
+  --from-literal=webhook-url="$url"
+```
+
+The container's log calls the Secret `discord-status`, because it shares the survival
+server's script.
+
+### Resources and backups
+
+4 GiB of memory is reserved for it, with a 2 GiB heap. With nobody online it used
+2.9 GiB in a local test. It reserves almost no CPU, on purpose: the node's CPU is almost
+fully reserved, and firecrawl-api needs one core unreserved to roll out an update. So this
+server runs on whatever is idle, and the survival server wins when both are busy.
+
+Its `backup` sidecar writes an archive every 6 hours and keeps 7 days, on a 10 GiB volume
+beside the 10 GiB data volume. The notes under [Backups](#backups) apply, except that this
+server's files are at the top of its data volume, and its claims are
+`data-minecraft-creative-0` and `backups-minecraft-creative-0`.
 
 ## Voice chat
 
@@ -484,6 +590,9 @@ To go back to the test server, revert the commit that started this server.
 Renovate proposes image digests. Bump `VERSION` and `PAPER_BUILD` by hand, after
 a backup and only when plugins support the new version. Check `MODRINTH_PROJECTS`
 at the same time. Minecraft worlds cannot be downgraded.
+
+The creative server uses the same image, Paper build and plugin builds, and the tests
+fail if the two differ, so change both files in one commit. Both servers then restart.
 
 ## Testing
 

@@ -82,6 +82,68 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
+  name: minecraft-creative-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: minecraft-creative
+  policyTypes: [Ingress]
+  ingress:
+    # Game and Bedrock ports only. RCON stays on the pod's loopback, and the two
+    # servers cannot reach each other.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: playit-agent
+      ports:
+        - {protocol: TCP, port: 25565}
+        - {protocol: UDP, port: 19132}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: minecraft-creative-egress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: minecraft-creative
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+    # Mojang authentication, Paper/plugin downloads and Discord: HTTPS only.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 0.0.0.0/8
+              - 10.0.0.0/8
+              - 100.64.0.0/10
+              - 127.0.0.0/8
+              - 169.254.0.0/16
+              - 172.16.0.0/12
+              - 192.0.0.0/24
+              - 192.0.2.0/24
+              - 192.168.0.0/16
+              - 198.18.0.0/15
+              - 198.51.100.0/24
+              - 203.0.113.0/24
+              - 224.0.0.0/4
+              - 240.0.0.0/4
+      ports:
+        - {protocol: TCP, port: 443}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
   name: playit-agent-egress
 spec:
   podSelector:
@@ -106,6 +168,14 @@ spec:
       ports:
         - {protocol: TCP, port: 25565}
         - {protocol: UDP, port: 24454}
+        - {protocol: UDP, port: 19132}
+    # The creative server's Java and Bedrock tunnels.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: minecraft-creative
+      ports:
+        - {protocol: TCP, port: 25565}
         - {protocol: UDP, port: 19132}
     # The web map's HTTPS tunnel, to Caddy's HTTP and HTTPS ports.
     - to:

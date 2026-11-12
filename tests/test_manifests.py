@@ -95,9 +95,23 @@ class DripcraftPublicTests(unittest.TestCase):
             "$['ServerWatchdogEnabled']": False,
             "$['ChannelTopicUpdaterChannelTopicsAtShutdownEnabled']": False,
             "$['DiscordCannedResponses']": {},
+            "$['MaximumAttemptsForSystemDNSBeforeUsingFallbackDNS']": -1,
         })
         patch = next(p for p in patches if p["file"] == "/data/plugins/DiscordSRV/messages.yml")
         self.assertEqual({op["$set"]["value"] for op in patch["ops"]}, {""})
+
+    def test_discord_keeps_using_the_cluster_dns(self):
+        # After three failed lookups in a row DiscordSRV asks public DNS servers instead and
+        # never goes back. The servers may only reach the cluster's DNS, so a short internet
+        # outage would leave the bot offline until the next restart. -1 turns the switch off.
+        for patches in (self.patches, self.creative_patches):
+            patch = next(p for p in patches if p["file"] == "/data/plugins/DiscordSRV/config.yml")
+            op = next(op["$set"] for op in patch["ops"] if "SystemDNS" in op["$set"]["path"])
+            self.assertEqual((op["value"], op["value-type"]), (-1, "int"))
+        for policy in ("minecraft-egress", "minecraft-creative-egress"):
+            dns = [r for r in self.egress(policy) if any(p["port"] == 53 for p in r["ports"])]
+            self.assertEqual(len(dns), 1, policy)
+            self.assertEqual([p["podSelector"]["matchLabels"] for p in dns[0]["to"]], [{"k8s-app": "kube-dns"}], policy)
 
     def test_discord_token_comes_from_an_optional_secret(self):
         ref = self.env()["DISCORDSRV_TOKEN"]["valueFrom"]["secretKeyRef"]

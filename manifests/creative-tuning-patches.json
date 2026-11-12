@@ -40,6 +40,13 @@
             "path": "$['DiscordCannedResponses']",
             "value": {}
           }
+        },
+        {
+          "$set": {
+            "path": "$['MaximumAttemptsForSystemDNSBeforeUsingFallbackDNS']",
+            "value": -1,
+            "value-type": "int"
+          }
         }
       ]
     },

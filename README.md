@@ -321,6 +321,16 @@ the placeholder `!ip` and `!site` answers. These apply from the second start aft
 installing, because the plugin creates its settings files on the first. Until a channel is
 set, nothing is relayed, so the first start is safe.
 
+It also sets `MaximumAttemptsForSystemDNSBeforeUsingFallbackDNS` to `-1`. By default the
+plugin switches to public DNS servers after three failed lookups in a row and stays on them
+until the server restarts. The network policy only lets the server reach the cluster's DNS,
+so a short internet outage left the bot offline until the server was restarted. With `-1`
+it keeps asking the cluster's DNS, and it retries the connection every 15 minutes at the
+longest.
+
+If chat stops crossing, look for `failed to resolve discord.com` in the server log.
+Restarting the server brings the bot back.
+
 ## Live status in Discord
 
 One message in a Discord channel shows whether the server is up and who is playing, and is

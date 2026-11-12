@@ -153,9 +153,10 @@ spec:
             # Bedrock players through Geyser and Floodgate, and Discord chat.
             - name: MODRINTH_PROJECTS
               value: geyser:KmriR1ju,discordsrv:ATlquwiT
+            # ShareCures is built from sharecures/ in this repository (see README).
             # Floodgate for Paper is not on Modrinth. Pinned to one build.
             - name: PLUGINS
-              value: https://download.geysermc.org/v2/projects/floodgate/versions/2.2.5/builds/141/downloads/spigot
+              value: https://github.com/sbrerup/dripcraft/releases/download/sharecures-v1.0.0/sharecures-1.0.0.jar,https://download.geysermc.org/v2/projects/floodgate/versions/2.2.5/builds/141/downloads/spigot
             # Discord chat. This must be a different bot from the survival
             # server's, because a server ignores messages its own bot posted (see
             # README). Without this Secret the plugin turns itself off and the

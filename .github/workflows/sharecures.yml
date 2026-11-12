@@ -1,0 +1,59 @@
+name: sharecures
+
+# Builds and tests the ShareCures plugin. A tag named sharecures-v<version>
+# also publishes the jar as a GitHub release, which is where the server
+# downloads it from (PLUGINS in manifests/minecraft.yaml).
+on:
+  pull_request:
+    paths:
+      - sharecures/**
+      - .github/workflows/sharecures.yml
+  push:
+    branches: [main]
+    paths:
+      - sharecures/**
+      - .github/workflows/sharecures.yml
+    tags:
+      - sharecures-v*
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+      - run: mvn -B package
+        working-directory: sharecures
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jar
+          path: sharecures/target/sharecures-*.jar
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/sharecures-v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: jar
+      - name: Publish the jar
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          jar="sharecures-${TAG#sharecures-v}.jar"
+          # Fails here if the tag and the version in pom.xml differ.
+          test -f "$jar"
+          gh release create "$TAG" "$jar" --title "ShareCures ${TAG#sharecures-v}" --notes "Built from $GITHUB_SHA."

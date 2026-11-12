@@ -1,0 +1,14 @@
+name: ShareCures
+version: '${project.version}'
+main: io.github.sbrerup.sharecures.ShareCuresPlugin
+api-version: '1.21'
+description: Lets players share their zombie villager cure discounts with everyone.
+commands:
+  sharecures:
+    description: Share your villager cure discounts with everyone, or stop sharing.
+    usage: /<command> [on|off]
+    permission: sharecures.use
+permissions:
+  sharecures.use:
+    description: Choose whether to share cure discounts.
+    default: true

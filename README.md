@@ -295,6 +295,35 @@ cannot be turned off for the whole server.
 The original ChestSort crashes on start on Minecraft 26.x, because it cannot read
 the new version format.
 
+## Shared cure discounts
+
+ShareCures lets a player share the discount they get for curing a zombie villager. It
+is off for each player until they run `/sharecures on`; `/sharecures off` stops it and
+`/sharecures` shows the current choice. A player who cures a villager without sharing
+gets a one-line reminder that the command exists.
+
+Prices stay vanilla. A cure gives the curer a permanent reputation on that villager,
+which the game never passes on. When anyone opens a trade, the plugin lends them the
+cure reputation of a sharing player on that villager, so they pay what the curer pays.
+It works for villagers cured before the plugin was installed, and for players who were
+offline at the time. A player who stops sharing takes the loan back, the next time each
+other player opens a trade with that villager.
+
+The choices are in `plugins/ShareCures/sharers.txt` on the data volume, one player UUID
+per line. The loans are stored on each villager.
+
+The plugin's source is in `sharecures/`. To release a new version, change `version` in
+`sharecures/pom.xml`, merge, and push a tag named `sharecures-v` plus that version. The
+`sharecures` workflow then publishes the jar as a GitHub release, and the release's
+download URL goes in `PLUGINS` in both servers' manifests, before the Floodgate URL.
+When `PAPER_BUILD` changes, change `paper.version` in `pom.xml` to match.
+
+To build it without Java installed:
+
+```bash
+docker run --rm -v "$PWD/sharecures:/src" -w /src maven:3.9-eclipse-temurin-25 mvn -B package
+```
+
 ## Discord chat
 
 DiscordSRV links Minecraft chat to one Discord channel, both ways. Joins, leaves, deaths

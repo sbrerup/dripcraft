@@ -140,8 +140,14 @@ after adding someone to the survival server:
 ```bash
 kubectl -n dripcraft-public exec minecraft-0 -c minecraft -- cat /data/whitelist.json | \
   kubectl -n dripcraft-public exec -i minecraft-creative-0 -c minecraft -- \
-  sh -c 'cat > /data/whitelist.json && rcon-cli whitelist reload'
+  sh -c 'cat > /tmp/whitelist.json && [ -s /tmp/whitelist.json ] &&
+    cp /tmp/whitelist.json /data/whitelist.json && rcon-cli whitelist reload'
 ```
+
+It answers `Reloaded the whitelist`. If the first command fails, nothing arrives and this
+server's whitelist is left as it was. In Git Bash on Windows, run
+`export MSYS_NO_PATHCONV=1` first: without it the `/data` path in the first command is
+rewritten to a Windows path, and that command fails.
 
 ### Chat between the two servers
 

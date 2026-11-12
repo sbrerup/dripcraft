@@ -138,7 +138,7 @@ spec:
             - name: DIFFICULTY
               value: peaceful
             - name: MOTD
-              value: Lush Acres Creative
+              value: Creative Acres
             - name: MAX_PLAYERS
               value: "10"
             - name: SPAWN_PROTECTION
@@ -291,7 +291,7 @@ spec:
           command: [sh, /scripts/discord-status.sh]
           env:
             - name: SERVER_NAME
-              value: Lush Acres Creative
+              value: Creative Acres
             - name: RCON_PASSWORD
               valueFrom:
                 secretKeyRef:

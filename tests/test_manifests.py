@@ -426,7 +426,10 @@ class DripcraftPublicTests(unittest.TestCase):
             self.assertEqual(creative["ops"], survival["ops"], file)
 
     def test_creative_status_message_has_its_own_name_and_webhook(self):
-        self.assertNotEqual(self.creative_env("discord-status")["SERVER_NAME"]["value"], "Lush Acres")
+        name = self.creative_env("discord-status")["SERVER_NAME"]["value"]
+        self.assertNotEqual(name, "Lush Acres")
+        # Players see one name, in the server list and in Discord.
+        self.assertEqual(name, self.creative_env()["MOTD"]["value"])
         volume = next(v for v in self.creative["volumes"] if v["name"] == "discord-webhook")
         self.assertEqual(volume["secret"], {"secretName": "discord-status-creative", "optional": True})
         mount = next(m for m in self.creative_container("discord-status")["volumeMounts"] if m["name"] == "discord-webhook")

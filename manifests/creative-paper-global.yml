@@ -1,0 +1,5 @@
+# The creative server's copy. Copied to /data/config on start; Paper fills in
+# everything else. Must match the tunnel's Proxy Protocol setting in the playit
+# dashboard (Version 2).
+proxies:
+  proxy-protocol: true

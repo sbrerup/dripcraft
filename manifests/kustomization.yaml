@@ -4,6 +4,7 @@ namespace: dripcraft-public
 resources:
 - namespace.yaml
 - minecraft.yaml
+- creative.yaml
 - playit.yaml
 - uptime-check.yaml
 - web-map.yaml
@@ -14,6 +15,11 @@ configMapGenerator:
   - paper-global.yml
   - player-permissions.yml
   - tuning-patches.json
+# The creative server's own copies, under the names its pod mounts them by.
+- name: creative-config
+  files:
+  - paper-global.yml=creative-paper-global.yml
+  - tuning-patches.json=creative-tuning-patches.json
 - name: discord-status
   files:
   - discord-status.sh

@@ -19,6 +19,8 @@ class DripcraftPublicTests(unittest.TestCase):
         )
         cls.objects = {(obj["kind"], obj["metadata"]["name"]): obj for obj in yaml.safe_load_all(text)}
         cls.server = cls.objects[("StatefulSet", "minecraft")]["spec"]["template"]["spec"]
+        cls.creative = cls.objects[("StatefulSet", "minecraft-creative")]["spec"]["template"]["spec"]
+        cls.creative_patches = json.loads((ROOT / "manifests" / "creative-tuning-patches.json").read_text())["patches"]
         cls.agent = cls.objects[("Deployment", "playit-agent")]["spec"]["template"]["spec"]
         cls.uptime = cls.objects[("CronJob", "uptime-check")]["spec"]["jobTemplate"]["spec"]["template"]["spec"]
         cls.web_map = cls.objects[("Deployment", "web-map")]["spec"]["template"]["spec"]
@@ -43,7 +45,7 @@ class DripcraftPublicTests(unittest.TestCase):
         self.assertEqual(labels["pod-security.kubernetes.io/enforce"], "restricted")
 
     def test_pods_are_locked_down(self):
-        for pod in (self.server, self.agent, self.uptime, self.web_map):
+        for pod in (self.server, self.creative, self.agent, self.uptime, self.web_map):
             self.assertIs(pod["automountServiceAccountToken"], False)
             self.assertIs(pod["securityContext"]["runAsNonRoot"], True)
             self.assertEqual(pod["securityContext"]["seccompProfile"]["type"], "RuntimeDefault")
@@ -55,7 +57,7 @@ class DripcraftPublicTests(unittest.TestCase):
                 self.assertNotIn("add", context["capabilities"])
 
     def test_images_are_pinned_by_digest(self):
-        for pod in (self.server, self.agent, self.uptime, self.web_map):
+        for pod in (self.server, self.creative, self.agent, self.uptime, self.web_map):
             for container in pod["containers"]:
                 self.assertRegex(container["image"], r":[\w.-]+@sha256:[0-9a-f]{64}$")
 
@@ -295,7 +297,7 @@ class DripcraftPublicTests(unittest.TestCase):
         self.assertIn("allowed_mentions: {parse: []}", script)
 
     def test_egress_never_reaches_private_networks(self):
-        for policy in ("minecraft-egress", "playit-agent-egress", "uptime-check-egress", "web-map-egress"):
+        for policy in ("minecraft-egress", "minecraft-creative-egress", "playit-agent-egress", "uptime-check-egress", "web-map-egress"):
             blocks = [p["ipBlock"] for rule in self.egress(policy) for p in rule["to"] if "ipBlock" in p]
             self.assertEqual(len(blocks), 1, policy)
             self.assertEqual(blocks[0]["cidr"], "0.0.0.0/0")
@@ -348,6 +350,141 @@ class DripcraftPublicTests(unittest.TestCase):
 
     def test_server_egress_is_https_only(self):
         rule = next(r for r in self.egress("minecraft-egress") if "ipBlock" in r["to"][0])
+        self.assertEqual(rule["ports"], [{"protocol": "TCP", "port": 443}])
+
+    # The creative server.
+
+    def creative_container(self, name="minecraft"):
+        return next(c for c in self.creative["containers"] if c["name"] == name)
+
+    def creative_env(self, container="minecraft"):
+        return {e["name"]: e for e in self.creative_container(container)["env"]}
+
+    def test_creative_is_a_flat_world_where_everyone_is_in_creative_mode(self):
+        env = self.creative_env()
+        self.assertEqual(env["LEVEL_TYPE"]["value"], "minecraft:flat")
+        self.assertEqual(env["MODE"]["value"], "creative")
+        self.assertEqual(env["FORCE_GAMEMODE"]["value"], "TRUE")
+        self.assertEqual(env["DIFFICULTY"]["value"], "peaceful")
+
+    def test_creative_has_the_same_access_rules_as_survival(self):
+        survival, creative = self.env(), self.creative_env()
+        for name in (
+            "ONLINE_MODE", "ENABLE_WHITELIST", "ENFORCE_WHITELIST", "ENFORCE_SECURE_PROFILE",
+            "HIDE_ONLINE_PLAYERS", "ENABLE_QUERY", "ENABLE_COMMAND_BLOCK", "USES_PROXY_PROTOCOL",
+        ):
+            self.assertEqual(creative[name]["value"], survival[name]["value"], name)
+        paper = yaml.safe_load((ROOT / "manifests" / "creative-paper-global.yml").read_text())
+        self.assertIs(paper["proxies"]["proxy-protocol"], True)
+
+    def test_creative_runs_the_same_builds_as_survival(self):
+        # Players use one client for both, and each plugin build was checked against
+        # one Paper build, so the two servers are bumped together.
+        survival, creative = self.env(), self.creative_env()
+        for name in ("minecraft", "backup", "discord-status"):
+            self.assertEqual(self.creative_container(name)["image"], self.container(name)["image"], name)
+        for name in ("TYPE", "VERSION", "PAPER_BUILD", "PLUGINS"):
+            self.assertEqual(creative[name]["value"], survival[name]["value"], name)
+        builds = dict(item.split(":") for item in survival["MODRINTH_PROJECTS"]["value"].split(","))
+        projects = dict(item.split(":") for item in creative["MODRINTH_PROJECTS"]["value"].split(","))
+        self.assertEqual(set(projects), {"geyser", "discordsrv"})
+        for name, build in projects.items():
+            self.assertEqual(build, builds[name], name)
+
+    def test_creative_redstone_behaves_as_it_does_on_survival(self):
+        def redstone(patches):
+            patch = next(p for p in patches if p["file"] == "/data/config/paper-world-defaults.yml")
+            return next(op["$set"]["value"] for op in patch["ops"] if "redstone-implementation" in op["$set"]["path"])
+        self.assertEqual(redstone(self.creative_patches), redstone(self.patches))
+
+    def test_creative_discord_bot_is_not_the_survival_bot(self):
+        # A server ignores what its own bot posted, so sharing a bot would stop chat
+        # from one server reaching the other.
+        ref = self.creative_env()["DISCORDSRV_TOKEN"]["valueFrom"]["secretKeyRef"]
+        self.assertEqual((ref["name"], ref["key"]), ("discord-bot-creative", "token"))
+        self.assertIs(ref["optional"], True)
+        self.assertNotEqual(ref["name"], self.env()["DISCORDSRV_TOKEN"]["valueFrom"]["secretKeyRef"]["name"])
+
+    def test_creative_discord_is_restricted_like_survival(self):
+        for file in ("/data/plugins/DiscordSRV/config.yml", "/data/plugins/DiscordSRV/messages.yml"):
+            survival = next(p for p in self.patches if p["file"] == file)
+            creative = next(p for p in self.creative_patches if p["file"] == file)
+            self.assertEqual(creative["ops"], survival["ops"], file)
+
+    def test_creative_status_message_has_its_own_name_and_webhook(self):
+        self.assertNotEqual(self.creative_env("discord-status")["SERVER_NAME"]["value"], "Lush Acres")
+        volume = next(v for v in self.creative["volumes"] if v["name"] == "discord-webhook")
+        self.assertEqual(volume["secret"], {"secretName": "discord-status-creative", "optional": True})
+        mount = next(m for m in self.creative_container("discord-status")["volumeMounts"] if m["name"] == "discord-webhook")
+        self.assertNotIn("subPath", mount)
+        script = (ROOT / "manifests" / "discord-status.sh").read_text()
+        self.assertIn(f"{mount['mountPath']}/webhook-url", script)
+
+    def test_creative_config_is_mounted_where_the_image_reads_it(self):
+        mounts = {m["mountPath"]: m for m in self.creative_container()["volumeMounts"]}
+        data = self.objects_with_prefix("ConfigMap", "creative-config")["data"]
+        for path in (self.creative_env()["PATCH_DEFINITIONS"]["value"], "/config/paper-global.yml"):
+            self.assertEqual(mounts[path]["subPath"], pathlib.PurePosixPath(path).name)
+            self.assertIn(mounts[path]["subPath"], data)
+
+    def test_creative_has_its_own_volumes_mounted_whole(self):
+        # No subPath: local-path volumes ignore fsGroup, so a folder inside one would
+        # have to be created by hand before the pod starts.
+        claims = self.objects[("StatefulSet", "minecraft-creative")]["spec"]["volumeClaimTemplates"]
+        self.assertEqual([c["metadata"]["name"] for c in claims], ["data", "backups"])
+        for name in ("minecraft", "backup", "discord-status"):
+            mount = next(m for m in self.creative_container(name)["volumeMounts"] if m["name"] == "data")
+            self.assertEqual(mount["mountPath"], "/data", name)
+            self.assertNotIn("subPath", mount, name)
+
+    def test_creative_secrets_are_referenced_not_inlined(self):
+        for container in ("minecraft", "backup", "discord-status"):
+            self.assertIn("secretKeyRef", self.creative_env(container)["RCON_PASSWORD"]["valueFrom"])
+
+    def test_creative_heap_fits_in_the_pod_limit(self):
+        resources = self.creative_container()["resources"]
+        heap = int(self.creative_env()["MEMORY"]["value"].rstrip("G"))
+        limit = int(resources["limits"]["memory"].rstrip("Gi"))
+        self.assertGreaterEqual(limit - heap, 2)
+        self.assertEqual(resources["requests"]["memory"], resources["limits"]["memory"])
+        self.assertNotIn("cpu", resources["limits"])
+
+    def test_creative_reserves_almost_no_cpu(self):
+        # The node's CPU is almost fully reserved, and firecrawl-api needs 1 core
+        # unreserved to roll out an update. Check the node before raising this.
+        millicores = sum(int(c["resources"]["requests"]["cpu"].rstrip("m")) for c in self.creative["containers"])
+        self.assertLessEqual(millicores, 40)
+
+    def test_creative_restart_warning_fits_in_the_shutdown_window(self):
+        env = self.creative_env()
+        needed = int(env["STOP_SERVER_ANNOUNCE_DELAY"]["value"]) + int(env["STOP_DURATION"]["value"])
+        self.assertGreater(self.creative["terminationGracePeriodSeconds"], needed)
+
+    def test_creative_tunnel_origin_is_a_fixed_address_of_its_own(self):
+        service = self.objects[("Service", "minecraft-creative")]["spec"]
+        self.assertEqual(service["clusterIP"], "10.96.25.67")
+        self.assertEqual(service.get("type", "ClusterIP"), "ClusterIP")
+        self.assertEqual(
+            [(p["protocol"], p["port"]) for p in service["ports"]],
+            [("TCP", 25565), ("UDP", 19132)],
+        )
+        fixed = [obj["spec"]["clusterIP"] for (kind, _), obj in self.objects.items() if kind == "Service"]
+        self.assertEqual(len(fixed), len(set(fixed)))
+
+    def test_only_the_agent_reaches_the_creative_server(self):
+        self.assertEqual(self.ingress_by_source("minecraft-creative-ingress"), {
+            "playit-agent": [{"protocol": "TCP", "port": 25565}, {"protocol": "UDP", "port": 19132}],
+        })
+
+    def test_agent_can_reach_the_creative_server(self):
+        rule = next(
+            r for r in self.egress("playit-agent-egress")
+            if r["to"][0].get("podSelector", {}).get("matchLabels", {}).get("app.kubernetes.io/name") == "minecraft-creative"
+        )
+        self.assertEqual(rule["ports"], [{"protocol": "TCP", "port": 25565}, {"protocol": "UDP", "port": 19132}])
+
+    def test_creative_egress_is_https_only(self):
+        rule = next(r for r in self.egress("minecraft-creative-egress") if "ipBlock" in r["to"][0])
         self.assertEqual(rule["ports"], [{"protocol": "TCP", "port": 443}])
 
 

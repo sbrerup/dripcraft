@@ -1,0 +1,355 @@
+# The creative server: a second, smaller Paper server with a flat world, where
+# every player is in creative mode. It is a separate server rather than a second
+# world, so nothing can be carried into the survival world and nobody teleports
+# between the two. Players join it at its own address (see README).
+apiVersion: v1
+kind: Service
+metadata:
+  name: minecraft-creative
+  labels:
+    app.kubernetes.io/name: minecraft-creative
+spec:
+  # The playit tunnels' origin is typed into the playit dashboard, so this
+  # address must stay stable across Service re-creation.
+  clusterIP: 10.96.25.67
+  selector:
+    app.kubernetes.io/name: minecraft-creative
+  ports:
+    - name: minecraft
+      port: 25565
+      targetPort: minecraft
+      protocol: TCP
+    # Geyser, for Bedrock players. Has its own playit tunnel (see README).
+    - name: bedrock
+      port: 19132
+      targetPort: bedrock
+      protocol: UDP
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: minecraft-creative
+  labels:
+    app.kubernetes.io/name: minecraft-creative
+  annotations:
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+spec:
+  replicas: 1
+  serviceName: minecraft-creative
+  persistentVolumeClaimRetentionPolicy:
+    whenDeleted: Retain
+    whenScaled: Retain
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: minecraft-creative
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: minecraft-creative
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      # Room for STOP_SERVER_ANNOUNCE_DELAY and STOP_DURATION together.
+      terminationGracePeriodSeconds: 210
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: minecraft
+          # The same image, Paper build and plugin builds as the survival server
+          # in minecraft.yaml. Bump them together (the tests check this).
+          image: itzg/minecraft-server:java25@sha256:e2fabc536673f8c6b343055c93f7a73e10caa79cd3368f645987593c65adf1e0
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          env:
+            - name: TZ
+              value: Europe/Copenhagen
+            - name: EULA
+              value: "TRUE"
+            - name: TYPE
+              value: PAPER
+            - name: VERSION
+              value: "26.3"
+            - name: PAPER_BUILD
+              value: "241"
+            # A flat world with no mobs needs far less than the survival server.
+            # Keep the pod limit about 2Gi above the heap.
+            - name: MEMORY
+              value: 2G
+            - name: USE_AIKAR_FLAGS
+              value: "TRUE"
+            - name: JVM_XX_OPTS
+              value: -XX:+UseTransparentHugePages -XX:+UseCompactObjectHeaders
+            # Settings with no environment variable, applied on every start.
+            - name: PATCH_DEFINITIONS
+              value: /patches/tuning-patches.json
+            # Access: online accounts on this server's own whitelist only. Names
+            # are managed with rcon-cli (see README) because this repository is
+            # public.
+            - name: ONLINE_MODE
+              value: "TRUE"
+            - name: ENABLE_WHITELIST
+              value: "TRUE"
+            - name: ENFORCE_WHITELIST
+              value: "TRUE"
+            # Off because Bedrock players cannot chat while it is on.
+            - name: ENFORCE_SECURE_PROFILE
+              value: "FALSE"
+            - name: HIDE_ONLINE_PLAYERS
+              value: "TRUE"
+            - name: ENABLE_QUERY
+              value: "FALSE"
+            - name: ENABLE_COMMAND_BLOCK
+              value: "FALSE"
+            # Reachable on loopback only: the NetworkPolicy admits the game ports alone.
+            - name: ENABLE_RCON
+              value: "TRUE"
+            - name: RCON_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: minecraft-rcon
+                  key: password
+            # Game settings.
+            # The world's folder. Changing it starts a fresh world.
+            - name: LEVEL
+              value: creative
+            # A flat world: one layer of grass on dirt and bedrock, with no
+            # villages or other structures on it.
+            - name: LEVEL_TYPE
+              value: minecraft:flat
+            - name: GENERATE_STRUCTURES
+              value: "FALSE"
+            # Everyone is in creative mode, and is put back in it on every join.
+            - name: MODE
+              value: creative
+            - name: FORCE_GAMEMODE
+              value: "TRUE"
+            # No monsters. A flat world would otherwise fill with slimes.
+            - name: DIFFICULTY
+              value: peaceful
+            - name: MOTD
+              value: Lush Acres Creative
+            - name: MAX_PLAYERS
+              value: "10"
+            - name: SPAWN_PROTECTION
+              value: "0"
+            # The same distances as the survival server.
+            - name: VIEW_DISTANCE
+              value: "16"
+            - name: SIMULATION_DISTANCE
+              value: "8"
+            - name: SYNC_CHUNK_WRITES
+              value: "FALSE"
+            # Bedrock players through Geyser and Floodgate, and Discord chat.
+            - name: MODRINTH_PROJECTS
+              value: geyser:KmriR1ju,discordsrv:ATlquwiT
+            # Floodgate for Paper is not on Modrinth. Pinned to one build.
+            - name: PLUGINS
+              value: https://download.geysermc.org/v2/projects/floodgate/versions/2.2.5/builds/141/downloads/spigot
+            # Discord chat. This must be a different bot from the survival
+            # server's, because a server ignores messages its own bot posted (see
+            # README). Without this Secret the plugin turns itself off and the
+            # server starts as normal.
+            - name: DISCORDSRV_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: discord-bot-creative
+                  key: token
+                  optional: true
+            # Every connection must carry a PROXY header from the playit agent,
+            # which is how the server sees real player addresses. mc-health
+            # uses this to send the header itself.
+            - name: USES_PROXY_PROTOCOL
+              value: "TRUE"
+            - name: STOP_DURATION
+              value: "120"
+            # Warns players in chat, then waits this many seconds before stopping.
+            - name: STOP_SERVER_ANNOUNCE_DELAY
+              value: "60"
+          ports:
+            - name: minecraft
+              containerPort: 25565
+              protocol: TCP
+            - name: bedrock
+              containerPort: 19132
+              protocol: UDP
+          # First boot downloads Paper and generates the world.
+          startupProbe:
+            exec:
+              command: [mc-health]
+            periodSeconds: 10
+            timeoutSeconds: 15
+            failureThreshold: 60
+          readinessProbe:
+            exec:
+              command: [mc-health]
+            periodSeconds: 30
+            timeoutSeconds: 15
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command: [mc-health]
+            periodSeconds: 60
+            timeoutSeconds: 15
+            failureThreshold: 5
+          resources:
+            # No CPU limit, as on the survival server. The small request is on
+            # purpose: the node's CPU is almost fully reserved, and firecrawl-api
+            # needs 1 core unreserved to roll out an update. This server uses
+            # whatever is idle, and the survival server wins when both are busy.
+            requests:
+              cpu: 25m
+              memory: 4Gi
+            limits:
+              memory: 4Gi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: creative-config
+              mountPath: /config/paper-global.yml
+              subPath: paper-global.yml
+              readOnly: true
+            - name: creative-config
+              mountPath: /patches/tuning-patches.json
+              subPath: tuning-patches.json
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+        - name: backup
+          image: itzg/mc-backup:latest@sha256:452e5c458e1eeb7ee47ae2d4afca0cec14ce878a12b4a8311ad2586b5e6cb118
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          env:
+            - name: TZ
+              value: Europe/Copenhagen
+            - name: BACKUP_METHOD
+              value: tar
+            - name: BACKUP_INTERVAL
+              value: 6h
+            - name: INITIAL_DELAY
+              value: 15m
+            # A flat world is small, and the builds are all this server is for.
+            - name: PRUNE_BACKUPS_DAYS
+              value: "7"
+            - name: SRC_DIR
+              value: /data
+            - name: DEST_DIR
+              value: /backups
+            - name: EXCLUDES
+              value: "*.jar,cache,logs,libraries,versions"
+            - name: RCON_HOST
+              value: localhost
+            - name: RCON_PORT
+              value: "25575"
+            - name: RCON_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: minecraft-rcon
+                  key: password
+          resources:
+            requests:
+              cpu: 10m
+              memory: 64Mi
+            limits:
+              memory: 512Mi
+          volumeMounts:
+            - name: data
+              mountPath: /data
+              readOnly: true
+            - name: backups
+              mountPath: /backups
+            - name: backup-tmp
+              mountPath: /tmp
+        # Keeps a second message in Discord showing whether this server is up and
+        # who is on it (see README). Posts nothing until the discord-status-creative
+        # Secret exists.
+        - name: discord-status
+          # Already on the node, and it has rcon-cli, curl and jq.
+          image: itzg/minecraft-server:java25@sha256:e2fabc536673f8c6b343055c93f7a73e10caa79cd3368f645987593c65adf1e0
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          command: [sh, /scripts/discord-status.sh]
+          env:
+            - name: SERVER_NAME
+              value: Lush Acres Creative
+            - name: RCON_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: minecraft-rcon
+                  key: password
+          resources:
+            requests:
+              cpu: 5m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
+          volumeMounts:
+            # The message's ID is kept here, so a restart edits the same message.
+            - name: data
+              mountPath: /data
+            - name: discord-status
+              mountPath: /scripts
+              readOnly: true
+            # Not a subPath, so a new or changed Secret reaches the container
+            # without restarting the server.
+            - name: discord-webhook
+              mountPath: /run/discord-status
+              readOnly: true
+      volumes:
+        - name: creative-config
+          configMap:
+            name: creative-config
+        - name: tmp
+          emptyDir:
+            sizeLimit: 2Gi
+        - name: backup-tmp
+          emptyDir:
+            sizeLimit: 256Mi
+        - name: discord-status
+          configMap:
+            name: discord-status
+        - name: discord-webhook
+          secret:
+            secretName: discord-status-creative
+            optional: true
+  # Mounted whole, with no subPath: local-path volumes ignore fsGroup, so a
+  # folder inside one would have to be created by hand before the pod starts.
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: local-path-retain
+        resources:
+          requests:
+            storage: 10Gi
+    - metadata:
+        name: backups
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: local-path-retain
+        resources:
+          requests:
+            storage: 10Gi

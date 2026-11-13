@@ -197,7 +197,9 @@ class DripcraftPublicTests(unittest.TestCase):
 
     def test_caddy_proxies_to_the_servers_map_port(self):
         server = {p["name"]: p["containerPort"] for p in self.container("minecraft")["ports"]}
-        self.assertIn(f"reverse_proxy minecraft:{server['map']}", self.caddyfile)
+        # The map is under /map/, and the page at the root links to it there.
+        self.assertIn(f"handle_path /map/* {{\n\t\treverse_proxy minecraft:{server['map']}\n\t}}", self.caddyfile)
+        self.assertIn('<a href="map/">', (ROOT / "manifests" / "player-stats.html").read_text(encoding="utf-8"))
         service = self.objects[("Service", "minecraft")]["spec"]["ports"]
         self.assertIn({"name": "map", "port": server["map"], "targetPort": "map", "protocol": "TCP"}, service)
 
@@ -279,7 +281,7 @@ class DripcraftPublicTests(unittest.TestCase):
         self.assertEqual(page["items"], [{"key": "index.html", "path": "index.html"}])
         self.assertIn("index.html", self.objects_with_prefix("ConfigMap", "player-stats")["data"])
         # The page asks for data/stats.json beside itself.
-        self.assertIn("handle_path /stats/data/* {", self.caddyfile)
+        self.assertIn("handle_path /data/* {", self.caddyfile)
         self.assertIn('fetch("data/stats.json"', (ROOT / "manifests" / "player-stats.html").read_text(encoding="utf-8"))
 
     def test_stats_are_written_where_caddy_reads_them(self):

@@ -434,8 +434,9 @@ it took down same-wood walls touching a tree.
 
 ## Web map
 
-squaremap draws the world from above as a map in the browser, at the game's own address
-with `https://` in front. It shows the terrain and everything built on it, the spawn
+squaremap draws the world from above as a map in the browser, at `/map/` on the game's
+own address with `https://` in front. The address alone is the
+[player statistics](#player-statistics) page, which links to the map. It shows the terrain and everything built on it, the spawn
 point, the world border and where each player is, updated every second. Anyone who knows
 the server's address can see every base and follow players around. A player is left off
 the map while invisible, in spectator mode or wearing a carved pumpkin.
@@ -531,7 +532,8 @@ its settings files. Pl3xMap has only beta builds for 26.x, and Dynmap has none.
 
 ## Player statistics
 
-`/stats/` on the web map's address shows what each player has done in the survival world:
+The game's own address with `https://` in front, the one the web map's tunnel serves,
+opens a page that shows what each player has done in the survival world:
 time played, deaths, mobs killed, blocks mined, distance travelled, items crafted and
 trades with villagers. Selecting a player shows what they mined, crafted, used and killed
 most, what killed them, and how they travelled. Everyone stands together on a meadow at
@@ -569,6 +571,10 @@ is looking at. The container fetches what the page needs and Caddy serves the co
 All of this is kept in temporary folders that go with the pod, so a restart of the proxy fetches
 it again, and reads every log again for the addresses. Until a skin or a flag has been
 fetched, the page shows a plain figure or the flag emoji.
+
+Caddy serves the page at the root of the address and passes `/map/` on to squaremap with
+the folder's name taken off, which works because squaremap asks for its files by relative
+address. `/stats/`, where the page first was, redirects to the root.
 
 A player stays on the page after leaving the whitelist, for as long as their file exists.
 A Bedrock player who also plays on Java has two files and appears twice.

@@ -1,0 +1,611 @@
+<!doctype html>
+<!-- The player statistics page (see README). Caddy serves it at /stats/, and
+     player-stats.sh writes data/stats.json, data/skins/ and data/flags/ beside
+     it. It loads nothing from other sites: the skins and flags are copies the
+     script fetched. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lush Acres</title>
+<style>
+  /* A morning in the meadow, and the same meadow at dusk for dark mode. */
+  :root {
+    color-scheme: light dark;
+    --sky-top: #bfe3ee;
+    --sky-low: #f3f6d9;
+    --sun: #ffe08a;
+    --sun-glow: rgba(255, 224, 138, 0.55);
+    --cloud: rgba(255, 255, 255, 0.85);
+    --hill-far: #a9d48a;
+    --hill: #86c06a;
+    --meadow: #6dae58;
+    --meadow-low: #5a9c4c;
+    --bg: #f2f5e1;
+    --panel: #fffdf2;
+    --ink: #2c3b25;
+    --muted: #71805f;
+    --line: #dde5c2;
+    --leaf: #3f7d3a;
+    --wood: #8d5f3c;
+    --bar: #dcecc0;
+    --hover: #f4f8e2;
+    --sign: #fffdf2;
+    --shadow: 0 3px 0 #d3dcb4, 0 14px 28px -18px rgba(50, 80, 30, 0.55);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --sky-top: #101c2c;
+      --sky-low: #24403a;
+      --sun: #f4efd2;
+      --sun-glow: rgba(244, 239, 210, 0.25);
+      --cloud: rgba(255, 255, 255, 0);
+      --hill-far: #2b5338;
+      --hill: #244a30;
+      --meadow: #1f4129;
+      --meadow-low: #193523;
+      --bg: #16261b;
+      --panel: #1e3325;
+      --ink: #eaf1d9;
+      --muted: #a3b592;
+      --line: #32503a;
+      --leaf: #a8d98a;
+      --wood: #e2b184;
+      --bar: #2f5237;
+      --hover: #243d2c;
+      --sign: #1e3325;
+      --shadow: 0 3px 0 #0f1c13, 0 14px 28px -18px rgba(0, 0, 0, 0.9);
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font: 16px/1.5 ui-rounded, "SF Pro Rounded", "Hiragino Maru Gothic ProN", "Nunito", "Varela Round", "Segoe UI", system-ui, sans-serif;
+  }
+  a:focus-visible, button:focus-visible { outline: 3px solid var(--sun); outline-offset: 3px; border-radius: 8px; }
+  canvas { image-rendering: pixelated; display: block; }
+  canvas.head { width: 32px; height: 32px; border-radius: 8px; box-shadow: 0 2px 0 var(--line); flex: none; }
+  canvas.body { width: 48px; height: 96px; filter: drop-shadow(0 3px 0 rgba(30, 50, 20, 0.2)); flex: none; }
+  .flag { font-size: 1.1em; line-height: 1; cursor: default; flex: none; }
+  img.flag { width: 20px; height: auto; border-radius: 3px; box-shadow: 0 0 0 1px var(--line); vertical-align: -2px; }
+  .tag { padding: 1px 7px; border: 1px solid var(--line); border-radius: 999px; font-size: 0.6875rem; font-weight: 600; color: var(--muted); }
+  .here { width: 9px; height: 9px; border-radius: 50%; background: #7ee06a; box-shadow: 0 0 0 3px rgba(126, 224, 106, 0.3); flex: none; }
+
+  /* The sky, with the sun or the moon, and the welcome. */
+  .sky { position: relative; overflow: hidden; padding: 28px 16px 0; background: linear-gradient(var(--sky-top), var(--sky-low)); text-align: center; }
+  .sun { position: absolute; top: 34px; right: 12%; width: 74px; height: 74px; border-radius: 50%; background: var(--sun); box-shadow: 0 0 0 18px var(--sun-glow), 0 0 80px 30px var(--sun-glow); }
+  .cloud { position: absolute; height: 26px; border-radius: 999px; background: var(--cloud); }
+  .cloud::before, .cloud::after { content: ""; position: absolute; bottom: 8px; border-radius: 50%; background: inherit; }
+  .cloud::before { left: 16%; width: 38%; height: 30px; }
+  .cloud::after { right: 14%; width: 46%; height: 40px; }
+  .cloud.one { top: 46px; left: 8%; width: 130px; }
+  .cloud.two { top: 120px; right: 28%; width: 92px; opacity: 0.7; }
+  .firefly { display: none; position: absolute; width: 4px; height: 4px; border-radius: 50%; background: #f6f0a8; box-shadow: 0 0 8px 3px rgba(246, 240, 168, 0.6); animation: glow 4s ease-in-out infinite; }
+  @media (prefers-color-scheme: dark) { .firefly { display: block; } }
+  @keyframes glow { 0%, 100% { opacity: 0.15; transform: translateY(0); } 50% { opacity: 1; transform: translateY(-8px); } }
+  .sky nav { position: relative; display: flex; justify-content: flex-end; max-width: 1100px; margin: 0 auto; }
+  .sky nav a {
+    padding: 7px 16px; border-radius: 999px; background: var(--panel); color: var(--leaf);
+    font-weight: 700; font-size: 0.9375rem; text-decoration: none; box-shadow: var(--shadow);
+  }
+  .sky nav a:hover { transform: translateY(-1px); }
+  h1 { position: relative; margin: 18px 0 6px; font-size: clamp(2.5rem, 9vw, 4rem); line-height: 1.05; letter-spacing: -0.02em; color: var(--ink); }
+  h1 small { display: block; margin-bottom: 6px; font-size: 1rem; font-weight: 700; letter-spacing: 0; color: var(--leaf); }
+  #together { position: relative; max-width: 620px; margin: 0 auto; color: var(--ink); opacity: 0.85; text-wrap: balance; }
+  /* Out to both edges, through the sky's padding. */
+  .hills { display: block; width: calc(100% + 32px); height: clamp(60px, 11vw, 120px); margin: 20px -16px -1px; position: relative; }
+
+  /* The meadow, where everyone stands together. */
+  .meadow { background: linear-gradient(var(--meadow), var(--meadow-low)); padding: 0 12px 30px; margin-top: -1px; }
+  #lineup { display: flex; flex-wrap: wrap; justify-content: center; gap: 18px 10px; max-width: 1100px; margin: -34px auto 0; position: relative; }
+  .friend { all: unset; box-sizing: border-box; cursor: pointer; width: 134px; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .friend .standing { position: relative; }
+  /* The flag flies beside the figure, like one on a pole. */
+  .friend .standing .flag { position: absolute; top: 2px; left: 100%; margin-left: 2px; }
+  @media (max-width: 520px) {
+    .friend { width: 106px; }
+    #lineup .friend .sign { font-size: 0.625rem; padding: 2px 6px; }
+  }
+  .friend canvas.body { width: 56px; height: 112px; transition: transform 0.15s ease; }
+  .friend:hover canvas.body { transform: translateY(-5px); }
+  .friend.playing canvas.body { animation: bob 2.4s ease-in-out infinite; }
+  @keyframes bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+  .friend .ground { width: 50px; height: 9px; margin-top: -12px; border-radius: 50%; background: rgba(20, 50, 15, 0.28); }
+  .friend .sign {
+    display: flex; align-items: center; justify-content: center; gap: 5px; max-width: 100%; padding: 2px 8px;
+    border-radius: 999px; background: var(--sign); color: var(--ink); font-size: 0.71875rem; font-weight: 700;
+    box-shadow: 0 2px 0 rgba(20, 50, 15, 0.25);
+  }
+  .friend .sign b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #updated { margin: 22px 0 0; text-align: center; font-size: 0.8125rem; color: #f4fae6; opacity: 0.85; }
+
+  main { max-width: 1100px; margin: 0 auto; padding: 8px 16px 64px; }
+  main > h2 { margin: 30px 4px 12px; font-size: 1.375rem; letter-spacing: -0.01em; }
+  main > h2 small { display: block; font-size: 0.875rem; font-weight: 500; color: var(--muted); letter-spacing: 0; }
+
+  .records { display: grid; grid-template-columns: repeat(auto-fit, minmax(235px, 1fr)); gap: 14px; }
+  .record {
+    display: flex; align-items: center; gap: 14px; min-width: 0; padding: 14px 16px 12px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 20px; box-shadow: var(--shadow);
+  }
+  .record div { min-width: 0; }
+  .record span { display: block; font-size: 0.9375rem; font-weight: 800; color: var(--leaf); }
+  .record strong { display: block; font-size: 1rem; overflow-wrap: anywhere; }
+  .record em { display: block; font-style: normal; color: var(--muted); font-size: 0.8125rem; font-variant-numeric: tabular-nums; }
+
+  .scroll { container-type: inline-size; overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 20px; box-shadow: var(--shadow); }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  th, td { padding: 9px 14px; text-align: right; white-space: nowrap; }
+  th:nth-child(2), td:nth-child(2) { text-align: left; }
+  thead th { border-bottom: 2px dashed var(--line); padding: 0; }
+  thead button {
+    all: unset; box-sizing: border-box; display: block; width: 100%; padding: 14px 14px 10px;
+    cursor: pointer; font-size: 0.8125rem; font-weight: 700; color: var(--muted); text-align: inherit;
+  }
+  thead button:hover, thead th[aria-sort] button { color: var(--ink); }
+  thead th[aria-sort="descending"] button::after { content: " ▼"; color: var(--wood); }
+  thead th[aria-sort="ascending"] button::after { content: " ▲"; color: var(--wood); }
+  tbody tr.player { cursor: pointer; border-top: 1px solid var(--line); }
+  tbody tr.player:first-child { border-top: 0; }
+  tbody tr.player:hover, tbody tr.player.open { background: var(--hover); }
+  td.rank { color: var(--muted); width: 1%; font-weight: 700; }
+  td.name > div { display: flex; align-items: center; gap: 10px; font-weight: 700; }
+  td.name button { all: unset; cursor: pointer; }
+  tr.detail td { padding: 0; text-align: left; white-space: normal; background: var(--hover); }
+
+  /* As wide as the visible part of the table, and it stays put when the table scrolls sideways. */
+  .more { position: sticky; left: 0; width: 100cqw; padding: 12px 18px 24px; display: flex; flex-wrap: wrap; gap: 20px 32px; }
+  .portrait { flex: 0 0 150px; text-align: center; }
+  .portrait canvas.body { width: 96px; height: 192px; margin: 8px auto 12px; }
+  .portrait strong { display: block; font-size: 1.125rem; overflow-wrap: anywhere; }
+  .portrait p { margin: 2px 0 0; color: var(--muted); font-size: 0.875rem; }
+  .lists { flex: 1 1 260px; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px 28px; align-content: start; }
+  .lists h3 { margin: 8px 0 6px; font-size: 0.8125rem; font-weight: 800; color: var(--leaf); }
+  .lists ol { list-style: none; margin: 0; padding: 0; }
+  .lists li { position: relative; display: flex; justify-content: space-between; gap: 12px; padding: 2px 8px; margin-bottom: 3px; font-size: 0.875rem; }
+  .lists li i { position: absolute; inset: 0 auto 0 0; background: var(--bar); border-radius: 6px; }
+  .lists li span, .lists li b { position: relative; font-weight: 400; }
+  .lists p { margin: 0; color: var(--muted); font-size: 0.875rem; }
+  #message { padding: 32px 16px; text-align: center; color: var(--muted); }
+  footer { margin-top: 22px; color: var(--muted); font-size: 0.8125rem; text-align: center; text-wrap: balance; }
+  footer a { color: inherit; }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="sky">
+    <div class="sun" aria-hidden="true"></div>
+    <div class="cloud one" aria-hidden="true"></div>
+    <div class="cloud two" aria-hidden="true"></div>
+    <i class="firefly" style="top: 30%; left: 12%" aria-hidden="true"></i>
+    <i class="firefly" style="top: 62%; left: 27%; animation-delay: 1.3s" aria-hidden="true"></i>
+    <i class="firefly" style="top: 48%; left: 68%; animation-delay: 2.1s" aria-hidden="true"></i>
+    <i class="firefly" style="top: 74%; left: 84%; animation-delay: 0.6s" aria-hidden="true"></i>
+    <i class="firefly" style="top: 22%; left: 47%; animation-delay: 3s" aria-hidden="true"></i>
+    <nav><a href="/">🗺️ Web map</a></nav>
+    <h1><small>🌿 Welcome back to</small>Lush Acres</h1>
+    <p id="together">There is always room for one more.</p>
+    <svg class="hills" viewBox="0 0 1200 120" preserveAspectRatio="none" aria-hidden="true">
+      <path fill="var(--hill-far)" d="M0 70 C150 10 330 20 520 62 S900 96 1200 28 V120 H0Z"/>
+      <path fill="var(--hill)" d="M0 96 C220 36 420 52 640 84 S1010 70 1200 60 V120 H0Z"/>
+      <path fill="var(--meadow)" d="M0 110 C260 76 520 96 760 104 S1080 90 1200 100 V120 H0Z"/>
+    </svg>
+  </div>
+  <div class="meadow">
+    <div id="lineup" aria-label="Everyone"></div>
+    <p id="updated"></p>
+  </div>
+</header>
+<main>
+  <h2 id="awards-title" hidden>The noticeboard <small>Who has been up to what.</small></h2>
+  <section class="records" id="records" aria-labelledby="awards-title"></section>
+  <h2 id="everyone-title" hidden>Everyone's numbers <small>Pick a friend to see what they have been doing.</small></h2>
+  <div class="scroll">
+    <table id="table" aria-labelledby="everyone-title" hidden>
+      <thead><tr id="head"></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <p id="message">Loading…</p>
+  </div>
+  <footer>
+    Counted by the game itself since the world's first day. Someone who is playing shows numbers a few minutes
+    old. A flag is the country a friend last joined from:
+    <a href="https://db-ip.com" rel="noopener">IP Geolocation by DB-IP</a>.
+  </footer>
+</main>
+<script>
+"use strict";
+const number = new Intl.NumberFormat("en");
+const regions = new Intl.DisplayNames(["en"], { type: "region" });
+const custom = (p, key) => p.stats.custom[key] || 0;
+const sum = (object) => Object.values(object).reduce((a, b) => a + b, 0);
+const distance = (p) => Object.entries(p.stats.custom).reduce((a, [k, v]) => a + (k.endsWith("_one_cm") ? v : 0), 0);
+const count = (n) => number.format(n);
+const km = (cm) => cm >= 1e8 ? count(Math.round(cm / 1e5)) + " km" : cm >= 1e5 ? (cm / 1e5).toFixed(1) + " km" : Math.round(cm / 100) + " m";
+const hearts = (tenths) => count(Math.round(tenths / 20)) + " hearts";
+
+function duration(ticks) {
+  const minutes = Math.floor(ticks / 1200);
+  if (minutes < 60) return minutes + " min";
+  const hours = Math.floor(minutes / 60);
+  return hours < 100 ? hours + " h " + (minutes % 60) + " min" : count(hours) + " h";
+}
+
+function ago(seconds) {
+  if (!seconds) return "";
+  const minutes = Math.max(0, Math.floor(Date.now() / 60000 - seconds / 60));
+  if (minutes < 10) return "just now";
+  if (minutes < 60) return minutes + " min ago";
+  if (minutes < 1440) return Math.floor(minutes / 60) + " h ago";
+  const days = Math.floor(minutes / 1440);
+  return days === 1 ? "yesterday" : days + " days ago";
+}
+
+// "walk_on_water" becomes "Walk on water".
+function pretty(id) {
+  const words = id.replace(/_/g, " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+function country(code) {
+  try { return regions.of(code) || code; } catch (error) { return code; }
+}
+
+// A country code as its flag: a picture the script fetched, because Windows has no
+// flag emoji and would show two letters. Until the picture is there, the emoji shows.
+function flag(code) {
+  const image = element("img", null, "flag");
+  image.alt = image.title = "Joins from " + country(code);
+  image.width = 20;
+  image.onerror = () => {
+    const span = element("span", String.fromCodePoint(...[...code].map((c) => 0x1F1E6 + c.charCodeAt(0) - 65)), "flag");
+    span.title = image.title;
+    span.setAttribute("role", "img");
+    span.setAttribute("aria-label", image.title);
+    image.replaceWith(span);
+  };
+  image.src = "data/flags/" + code.toLowerCase() + ".png";
+  return image;
+}
+
+// Skins, loaded once each. A player without one, or whose skin does not load, gets
+// a plain figure.
+const skins = new Map();
+function skin(p) {
+  if (!p.skin) return Promise.resolve(null);
+  if (!skins.has(p.uuid)) {
+    skins.set(p.uuid, new Promise((resolve) => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = () => resolve(null);
+      image.src = "data/skins/" + encodeURIComponent(p.uuid) + ".png";
+    }));
+  }
+  return skins.get(p.uuid);
+}
+
+// Draws a player from the front, from the skin's own pixels: the face alone, or
+// the whole figure at one pixel per skin pixel, 16 wide and 32 tall.
+function figure(p, kind) {
+  const canvas = element("canvas", null, kind);
+  canvas.width = kind === "head" ? 8 : 16;
+  canvas.height = kind === "head" ? 8 : 32;
+  canvas.setAttribute("aria-hidden", "true");
+  const context = canvas.getContext("2d");
+  const x = kind === "head" ? 0 : 4;
+  const plain = () => {
+    context.fillStyle = "#c9a27e"; context.fillRect(x, 0, 8, 8);
+    context.fillStyle = "#5a4636"; context.fillRect(x + 1, 3, 2, 1); context.fillRect(x + 5, 3, 2, 1);
+    if (kind === "head") return;
+    context.fillStyle = "#6f8f4e"; context.fillRect(0, 8, 16, 12);
+    context.fillStyle = "#c9a27e"; context.fillRect(0, 16, 4, 4); context.fillRect(12, 16, 4, 4);
+    context.fillStyle = "#6b5140"; context.fillRect(4, 20, 8, 12);
+  };
+  plain();
+  skin(p).then((image) => {
+    if (!image) return;
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.imageSmoothingEnabled = false;
+    const part = (sx, sy, w, h, dx, dy, mirrored) => {
+      context.save();
+      context.translate(mirrored ? dx + w : dx, dy);
+      if (mirrored) context.scale(-1, 1);
+      context.drawImage(image, sx, sy, w, h, 0, 0, w, h);
+      context.restore();
+    };
+    part(8, 8, 8, 8, x, 0);
+    if (kind === "body") {
+      const arm = p.skin === "slim" ? 3 : 4;
+      part(20, 20, 8, 12, 4, 8);
+      part(44, 20, arm, 12, 4 - arm, 8);
+      part(4, 20, 4, 12, 4, 20);
+      if (image.height < 64) {
+        // An old skin has one arm and one leg, used for both sides.
+        part(44, 20, arm, 12, 12, 8, true);
+        part(4, 20, 4, 12, 8, 20, true);
+      } else {
+        part(36, 52, arm, 12, 12, 8);
+        part(20, 52, 4, 12, 8, 20);
+        // The second layer: jacket, sleeves and trousers.
+        part(20, 36, 8, 12, 4, 8);
+        part(44, 36, arm, 12, 4 - arm, 8);
+        part(52, 52, arm, 12, 12, 8);
+        part(4, 36, 4, 12, 4, 20);
+        part(4, 52, 4, 12, 8, 20);
+      }
+    }
+    // The hat layer goes on last.
+    part(40, 8, 8, 8, x, 0);
+  });
+  return canvas;
+}
+
+const TRAVEL = {
+  walk: "Walked", sprint: "Sprinted", crouch: "Crouched", swim: "Swum", fly: "Flown",
+  aviate: "By elytra", boat: "By boat", horse: "By horse", minecart: "By minecart",
+  pig: "By pig", strider: "By strider", climb: "Climbed", fall: "Fallen",
+  walk_on_water: "Walked on water", walk_under_water: "Walked under water",
+};
+
+const COLUMNS = [
+  { label: "Player", get: (p) => p.name.toLowerCase(), text: true },
+  { label: "Play time", get: (p) => custom(p, "play_time"), show: duration },
+  { label: "Last played", get: (p) => p.seen || 0, show: ago },
+  { label: "Deaths", get: (p) => custom(p, "deaths") },
+  { label: "Mob kills", get: (p) => custom(p, "mob_kills") },
+  { label: "Blocks mined", get: (p) => sum(p.stats.mined) },
+  { label: "Travelled", get: distance, show: km },
+  { label: "Items crafted", get: (p) => sum(p.stats.crafted) },
+  { label: "Trades", get: (p) => custom(p, "traded_with_villager") },
+];
+
+const RECORDS = [
+  { label: "🏡 Homebody", what: "played", column: 1 },
+  { label: "⛏️ Deepest digger", what: "blocks mined", column: 5 },
+  { label: "⚔️ Monster hunter", what: "mobs killed", column: 4 },
+  { label: "🥾 Wanderer", what: "travelled", column: 6 },
+  { label: "🛒 Best customer", what: "trades with villagers", column: 8 },
+  { label: "💀 Most adventurous", what: "deaths", column: 3 },
+];
+
+let players = [];
+// When the numbers were written. A file saved within a few minutes of that belongs
+// to someone who is playing, because the game saves everyone who is online together.
+let updated = 0;
+const playing = (p) => p.seen && updated - p.seen < 7 * 60;
+let sort = { column: 1, down: true };
+let open = null;
+
+function element(tag, text, className) {
+  const node = document.createElement(tag);
+  if (text != null) node.textContent = text;
+  if (className) node.className = className;
+  return node;
+}
+
+// A plain list has no bars, for numbers that do not compare with each other.
+function list(title, entries, show, plain) {
+  const box = element("div");
+  box.append(element("h3", title));
+  const top = entries.filter(([, value]) => value > 0).sort((a, b) => b[1] - a[1]).slice(0, plain ? 20 : 8);
+  if (!top.length) {
+    box.append(element("p", "Nothing yet"));
+    return box;
+  }
+  const ol = element("ol");
+  for (const [name, value] of top) {
+    const li = element("li");
+    if (!plain) {
+      const bar = element("i");
+      bar.style.width = (100 * value / top[0][1]) + "%";
+      li.append(bar);
+    }
+    li.append(element("span", name), element("b", (show || count)(value)));
+    ol.append(li);
+  }
+  box.append(ol);
+  return box;
+}
+
+const named = (object) => Object.entries(object).map(([id, value]) => [pretty(id), value]);
+
+function detail(p) {
+  const box = element("div", null, "more");
+  const portrait = element("div", null, "portrait");
+  portrait.append(figure(p, "body"), element("strong", p.name));
+  if (p.country) {
+    const from = element("p", "Joins from " + country(p.country) + " ");
+    from.append(flag(p.country));
+    portrait.append(from);
+  }
+  portrait.append(element("p", duration(custom(p, "play_time")) + " played"));
+
+  const travel = Object.entries(p.stats.custom)
+    .filter(([key]) => key.endsWith("_one_cm"))
+    .map(([key, value]) => { const id = key.slice(0, -7); return [TRAVEL[id] || pretty(id), value]; });
+  const facts = [
+    ["Jumps", custom(p, "jump")],
+    ["Player kills", custom(p, "player_kills")],
+    ["Nights slept", custom(p, "sleep_in_bed")],
+    ["Animals bred", custom(p, "animals_bred")],
+    ["Fish caught", custom(p, "fish_caught")],
+    ["Items enchanted", custom(p, "enchant_item")],
+    ["Raids won", custom(p, "raid_win")],
+    ["Chests opened", custom(p, "open_chest")],
+    ["Tools broken", sum(p.stats.broken)],
+  ];
+  const health = [
+    ["Damage dealt", custom(p, "damage_dealt")],
+    ["Damage taken", custom(p, "damage_taken")],
+    ["Blocked by shield", custom(p, "damage_blocked_by_shield")],
+  ];
+  const time = [
+    ["Since last death", custom(p, "time_since_death")],
+    ["Crouching", custom(p, "sneak_time")],
+  ];
+  const lists = element("div", null, "lists");
+  lists.append(
+    list("⛏️ Most mined", named(p.stats.mined)),
+    list("🔨 Most crafted", named(p.stats.crafted)),
+    list("🎒 Most used", named(p.stats.used)),
+    list("⚔️ Mobs killed", named(p.stats.killed)),
+    list("💀 Killed by", named(p.stats.killed_by)),
+    list("🥾 Travel", travel, km),
+    list("✨ Other", facts, count, true),
+    list("❤️ Health", health, hearts, true),
+    list("⏳ Time", time, duration, true),
+  );
+  box.append(portrait, lists);
+  return box;
+}
+
+function render() {
+  const column = COLUMNS[sort.column];
+  const sorted = [...players].sort((a, b) => {
+    const x = column.get(a), y = column.get(b);
+    const order = x < y ? -1 : x > y ? 1 : a.name.localeCompare(b.name);
+    return sort.down ? -order : order;
+  });
+
+  const head = document.getElementById("head");
+  head.replaceChildren(element("th"));
+  COLUMNS.forEach((c, index) => {
+    const th = element("th");
+    th.scope = "col";
+    if (index === sort.column) th.setAttribute("aria-sort", sort.down ? "descending" : "ascending");
+    const button = element("button", c.label);
+    button.type = "button";
+    button.addEventListener("click", () => {
+      sort = { column: index, down: index === sort.column ? !sort.down : !c.text };
+      render();
+    });
+    th.append(button);
+    head.append(th);
+  });
+
+  const rows = document.getElementById("rows");
+  rows.replaceChildren();
+  sorted.forEach((p, index) => {
+    const tr = element("tr", null, p.uuid === open ? "player open" : "player");
+    tr.append(element("td", index + 1, "rank"));
+    COLUMNS.forEach((c, i) => {
+      if (i === 0) {
+        const td = element("td", null, "name");
+        const box = element("div");
+        const button = element("button", p.name);
+        button.type = "button";
+        button.setAttribute("aria-expanded", p.uuid === open);
+        box.append(figure(p, "head"), button);
+        if (playing(p)) {
+          const dot = element("i", null, "here");
+          dot.title = "Playing now";
+          box.append(dot);
+        }
+        if (p.country) box.append(flag(p.country));
+        if (p.name.startsWith(".")) box.append(element("span", "Bedrock", "tag"));
+        td.append(box);
+        tr.append(td);
+      } else {
+        tr.append(element("td", c.show ? c.show(c.get(p)) : count(c.get(p))));
+      }
+    });
+    tr.addEventListener("click", () => { open = open === p.uuid ? null : p.uuid; render(); });
+    rows.append(tr);
+    if (p.uuid === open) {
+      const row = element("tr", null, "detail");
+      const td = element("td");
+      td.colSpan = COLUMNS.length + 1;
+      td.append(detail(p));
+      row.append(td);
+      rows.append(row);
+    }
+  });
+
+  const records = document.getElementById("records");
+  records.replaceChildren();
+  for (const record of RECORDS) {
+    const c = COLUMNS[record.column];
+    const best = players.reduce((a, b) => (c.get(b) > c.get(a) ? b : a), players[0]);
+    if (!best || !c.get(best)) continue;
+    const box = element("div", null, "record");
+    const text = element("div");
+    text.append(
+      element("span", record.label),
+      element("strong", best.name),
+      element("em", (c.show ? c.show(c.get(best)) : count(c.get(best))) + " " + record.what),
+    );
+    box.append(figure(best, "body"), text);
+    records.append(box);
+  }
+
+  // Everyone together on the meadow, whoever has played most in the middle.
+  const lineup = document.getElementById("lineup");
+  lineup.replaceChildren();
+  const middle = [];
+  [...players].sort((a, b) => custom(b, "play_time") - custom(a, "play_time"))
+    .forEach((p, index) => (index % 2 ? middle.unshift(p) : middle.push(p)));
+  for (const p of middle) {
+    const button = element("button", null, playing(p) ? "friend playing" : "friend");
+    button.type = "button";
+    button.title = playing(p) ? p.name + " is playing now" : p.name + ", last played " + ago(p.seen);
+    const sign = element("span", null, "sign");
+    if (playing(p)) sign.append(element("i", null, "here"));
+    sign.append(element("b", p.name));
+    const standing = element("span", null, "standing");
+    standing.append(figure(p, "body"));
+    if (p.country) standing.append(flag(p.country));
+    button.append(standing, element("span", null, "ground"), sign);
+    button.addEventListener("click", () => {
+      open = p.uuid;
+      render();
+      document.querySelector("tr.player.open").scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    lineup.append(button);
+  }
+
+  const hours = Math.round(players.reduce((a, p) => a + custom(p, "play_time"), 0) / 72000);
+  const here = players.filter(playing).length;
+  document.getElementById("together").textContent =
+    count(hours) + " hours together, " +
+    count(players.reduce((a, p) => a + sum(p.stats.mined), 0)) + " blocks mined and " +
+    km(players.reduce((a, p) => a + distance(p), 0)) + " wandered. " +
+    (here ? (here === 1 ? "One of us is playing right now." : here + " of us are playing right now.") : "There is always room for one more.");
+}
+
+async function load() {
+  const message = document.getElementById("message");
+  const table = document.getElementById("table");
+  try {
+    const response = await fetch("data/stats.json", { cache: "no-store" });
+    if (!response.ok) throw new Error(response.status);
+    const data = await response.json();
+    // Someone who joined and left at once has a file with no play time in it.
+    players = data.players
+      .map((p) => ({ ...p, name: p.name || p.uuid.slice(0, 8), country: /^[A-Z]{2}$/.test(p.country || "") ? p.country : null }))
+      .filter((p) => custom(p, "play_time") > 0);
+    updated = data.updated;
+    document.getElementById("updated").textContent =
+      "Last counted " + new Date(data.updated * 1000).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+    if (!players.length) throw new Error("empty");
+    message.hidden = true;
+    table.hidden = false;
+    document.getElementById("awards-title").hidden = false;
+    document.getElementById("everyone-title").hidden = false;
+    render();
+  } catch (error) {
+    // Keep showing what was loaded before, if anything.
+    if (players.length) return;
+    table.hidden = true;
+    message.hidden = false;
+    message.textContent = "Nothing counted yet. The numbers appear a few minutes after the first friend has played.";
+  }
+}
+
+load();
+setInterval(load, 5 * 60 * 1000);
+</script>
+</body>
+</html>

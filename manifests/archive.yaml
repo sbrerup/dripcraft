@@ -1,0 +1,97 @@
+# Keeps what the survival server knows about what players do, in a database that
+# only grows (see README). Its own pod, so that changing the hub never interrupts
+# it, and a fault in it never takes the hub or the map off the tunnel.
+#
+# Everything it gathers stays here. It can reach the server's map port and
+# nothing else: not the internet, not the LAN, not the rest of the cluster.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: archive
+  labels:
+    app.kubernetes.io/name: archive
+  annotations:
+    # What is in here cannot be gathered again, so Argo CD never removes it.
+    argocd.argoproj.io/sync-options: Prune=false,Delete=false
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: local-path-retain
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: archive
+  labels:
+    app.kubernetes.io/name: archive
+spec:
+  replicas: 1
+  # The volume can be mounted by one pod at a time.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: archive
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: archive
+    spec:
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: archive
+          # Python comes with SQLite, which both the archive and Prism's database are.
+          image: python:3.13-alpine@sha256:9ef1a599f863231c3d91e941389bfdc4a2d6070557243d54df1a4e57015b960e
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          command: [python3, -u, /scripts/archive.py]
+          env:
+            # The world's folder: LEVEL in minecraft.yaml.
+            - name: WORLD
+              value: dripcraft
+          resources:
+            # The node's CPU is almost fully reserved (see creative.yaml).
+            requests:
+              cpu: 5m
+              memory: 32Mi
+            limits:
+              memory: 128Mi
+          volumeMounts:
+            - name: server
+              mountPath: /server
+              subPath: server
+              readOnly: true
+            - name: script
+              mountPath: /scripts
+              readOnly: true
+            - name: archive
+              mountPath: /archive
+      volumes:
+        # The survival server's volume, which another pod on the same node can
+        # mount. Read-only here, so nothing in this pod can change the world or
+        # the grief log.
+        - name: server
+          persistentVolumeClaim:
+            claimName: data-minecraft-0
+            readOnly: true
+        - name: script
+          configMap:
+            name: archive
+        - name: archive
+          persistentVolumeClaim:
+            claimName: archive

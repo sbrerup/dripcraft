@@ -8,9 +8,12 @@ import os
 import pathlib
 import re
 import shutil
+import sqlite3
 import subprocess
+import sys
 import tempfile
 import unittest
+import zlib
 
 import yaml
 
@@ -32,6 +35,7 @@ class DripcraftPublicTests(unittest.TestCase):
         cls.agent = cls.objects[("Deployment", "playit-agent")]["spec"]["template"]["spec"]
         cls.uptime = cls.objects[("CronJob", "uptime-check")]["spec"]["jobTemplate"]["spec"]["template"]["spec"]
         cls.web_map = cls.objects[("Deployment", "web-map")]["spec"]["template"]["spec"]
+        cls.archive = cls.objects[("Deployment", "archive")]["spec"]["template"]["spec"]
         cls.patches = json.loads((ROOT / "manifests" / "tuning-patches.json").read_text())["patches"]
         cls.caddyfile = (ROOT / "manifests" / "Caddyfile").read_text()
 
@@ -53,7 +57,7 @@ class DripcraftPublicTests(unittest.TestCase):
         self.assertEqual(labels["pod-security.kubernetes.io/enforce"], "restricted")
 
     def test_pods_are_locked_down(self):
-        for pod in (self.server, self.creative, self.agent, self.uptime, self.web_map):
+        for pod in (self.server, self.creative, self.agent, self.uptime, self.web_map, self.archive):
             self.assertIs(pod["automountServiceAccountToken"], False)
             self.assertIs(pod["securityContext"]["runAsNonRoot"], True)
             self.assertEqual(pod["securityContext"]["seccompProfile"]["type"], "RuntimeDefault")
@@ -65,7 +69,7 @@ class DripcraftPublicTests(unittest.TestCase):
                 self.assertNotIn("add", context["capabilities"])
 
     def test_images_are_pinned_by_digest(self):
-        for pod in (self.server, self.creative, self.agent, self.uptime, self.web_map):
+        for pod in (self.server, self.creative, self.agent, self.uptime, self.web_map, self.archive):
             for container in pod["containers"]:
                 self.assertRegex(container["image"], r":[\w.-]+@sha256:[0-9a-f]{64}$")
 
@@ -433,6 +437,239 @@ class DripcraftPublicTests(unittest.TestCase):
             self.assertIn("keeps its last numbers", result.stdout)
             self.assertEqual(json.loads(out.read_text()), data)
 
+    def archive_container(self):
+        (container,) = self.archive["containers"]
+        return container
+
+    def test_archive_has_a_pod_of_its_own(self):
+        # A fault in it must not take the hub and the map off the tunnel, and a change
+        # to the hub must not stop it noting where everyone is.
+        self.assertNotIn("archive", [c["name"] for c in self.web_map["containers"]])
+        deployment = self.objects[("Deployment", "archive")]
+        self.assertEqual(deployment["spec"]["replicas"], 1)
+        # Its volume can be mounted by one pod at a time.
+        self.assertEqual(deployment["spec"]["strategy"], {"type": "Recreate"})
+
+    def test_archive_cannot_change_the_world_or_the_grief_log(self):
+        volume = next(v for v in self.archive["volumes"] if v["name"] == "server")
+        self.assertIs(volume["persistentVolumeClaim"]["readOnly"], True)
+        mount = next(m for m in self.archive_container()["volumeMounts"] if m["name"] == "server")
+        self.assertIs(mount["readOnly"], True)
+        # Prism's database is opened for reading only as well.
+        script = (ROOT / "manifests" / "archive.py").read_text(encoding="utf-8")
+        self.assertIn('"?mode=ro"', script)
+        self.assertEqual(len(re.findall(r"sqlite3\.connect\(", script)), 3)
+        self.assertEqual(len(re.findall(r"sqlite3\.connect\(address", script)), 2)
+
+    def test_archive_reads_the_survival_servers_folder_and_world(self):
+        container = self.archive_container()
+        env = {e["name"]: e["value"] for e in container["env"]}
+        self.assertEqual(env["WORLD"], self.env()["LEVEL"]["value"])
+        mount = next(m for m in container["volumeMounts"] if m["name"] == "server")
+        server = next(m for m in self.container("minecraft")["volumeMounts"] if m["name"] == "data")
+        self.assertEqual(mount["subPath"], server["subPath"])
+        script = (ROOT / "manifests" / "archive.py").read_text(encoding="utf-8")
+        self.assertIn(f'SERVER = os.environ.get("SERVER_DIR", "{mount["mountPath"]}")', script)
+        statefulset = self.objects[("StatefulSet", "minecraft")]
+        template = statefulset["spec"]["volumeClaimTemplates"][0]["metadata"]["name"]
+        volume = next(v for v in self.archive["volumes"] if v["name"] == "server")
+        self.assertEqual(volume["persistentVolumeClaim"]["claimName"], f"{template}-{statefulset['metadata']['name']}-0")
+
+    def test_archive_is_kept_on_a_volume_that_is_never_removed(self):
+        # What is in it cannot be gathered again.
+        claim = self.objects[("PersistentVolumeClaim", "archive")]
+        self.assertEqual(claim["metadata"]["annotations"]["argocd.argoproj.io/sync-options"], "Prune=false,Delete=false")
+        self.assertEqual(claim["spec"]["storageClassName"], "local-path-retain")
+        mount = next(m for m in self.archive_container()["volumeMounts"] if m["name"] == "archive")
+        volume = next(v for v in self.archive["volumes"] if v["name"] == "archive")
+        self.assertEqual(volume["persistentVolumeClaim"]["claimName"], "archive")
+        self.assertNotIn("readOnly", mount)
+        script = (ROOT / "manifests" / "archive.py").read_text(encoding="utf-8")
+        self.assertIn(f'ARCHIVE = os.environ.get("ARCHIVE_FILE", "{mount["mountPath"]}/archive.db")', script)
+
+    def test_archive_script_is_mounted_where_it_is_run(self):
+        container = self.archive_container()
+        script = pathlib.PurePosixPath(container["command"][-1])
+        mount = next(m for m in container["volumeMounts"] if m["mountPath"] == str(script.parent))
+        volume = next(v for v in self.archive["volumes"] if v["name"] == mount["name"])
+        self.assertIn(script.name, self.objects[("ConfigMap", volume["configMap"]["name"])]["data"])
+        # Unbuffered, so what it logs shows at once.
+        self.assertEqual(container["command"][:2], ["python3", "-u"])
+
+    def test_archive_reserves_almost_no_cpu(self):
+        self.assertLessEqual(int(self.archive_container()["resources"]["requests"]["cpu"].rstrip("m")), 5)
+
+    def test_what_the_archive_holds_cannot_leave_it(self):
+        # It reaches the cluster's DNS and the survival server's map port, where it asks
+        # who is on the map, and nothing else: no address on the internet or anywhere.
+        rules = self.egress("archive-egress")
+        self.assertEqual(len(rules), 2)
+        dns, server = rules
+        self.assertEqual(dns["to"][0]["podSelector"]["matchLabels"], {"k8s-app": "kube-dns"})
+        self.assertEqual(server["to"], [{"podSelector": {"matchLabels": {"app.kubernetes.io/name": "minecraft"}}}])
+        self.assertEqual(server["ports"], [{"protocol": "TCP", "port": 8080}])
+        self.assertNotIn("ipBlock", json.dumps(rules))
+        script = (ROOT / "manifests" / "archive.py").read_text(encoding="utf-8")
+        self.assertIn('PLAYERS_URL = os.environ.get("PLAYERS_URL", "http://minecraft:8080/tiles/players.json")', script)
+        self.assertEqual(re.findall(r"https?://[^\"' )]+", script), ["http://minecraft:8080/tiles/players.json"])
+        # Nothing may connect to it. No policy but the one that denies everything names it.
+        for (kind, name), policy in self.objects.items():
+            if kind == "NetworkPolicy" and "Ingress" in policy["spec"]["policyTypes"] and name != "default-deny":
+                self.assertNotEqual(policy["spec"]["podSelector"].get("matchLabels", {}).get("app.kubernetes.io/name"), "archive")
+        # And no port is published.
+        self.assertNotIn("ports", self.archive_container())
+        self.assertNotIn(("Service", "archive"), self.objects)
+
+    def test_archive_keeps_what_the_server_notes(self):
+        script = (ROOT / "manifests" / "archive.py").as_posix()
+
+        def prism_database(path, rows):
+            db = sqlite3.connect(path)
+            db.executescript("""
+                CREATE TABLE prism_actions (action_id INTEGER PRIMARY KEY, action varchar(25));
+                CREATE TABLE prism_players (player_id INTEGER PRIMARY KEY, player varchar(32), player_uuid char(36));
+                CREATE TABLE prism_activities (
+                    activity_id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp bigint, x INT, action_id bigint,
+                    cause_player_id bigint, descriptor varchar(255), serialized_data clob);
+                INSERT INTO prism_actions VALUES (1, 'block-break'), (2, 'block-place');
+                INSERT INTO prism_players VALUES (1, 'Ada', 'aaaaaaaa-0000-0000-0000-000000000001');
+            """)
+            db.executemany(
+                "INSERT INTO prism_activities (timestamp, x, action_id, cause_player_id, descriptor, serialized_data) VALUES (?, ?, ?, ?, ?, ?)", rows)
+            db.commit()
+            db.close()
+
+        with tempfile.TemporaryDirectory() as folder:
+            server = pathlib.Path(folder) / "server"
+            stats = server / "dripcraft" / "players" / "stats"
+            stats.mkdir(parents=True)
+            prism = server / "plugins" / "prism" / "prism.db"
+            prism.parent.mkdir(parents=True)
+            listed = pathlib.Path(folder) / "players.json"
+            archive = pathlib.Path(folder) / "kept" / "archive.db"
+
+            def run(now=None, **more):
+                env = {
+                    **os.environ, "ONCE": "1", "SERVER_DIR": server.as_posix(), "ARCHIVE_FILE": archive.as_posix(),
+                    "PLAYERS_URL": listed.as_uri(), "BATCH": "2", **more,
+                }
+                result = subprocess.run([sys.executable, script], env=env, capture_output=True, text=True, timeout=60)
+                # It ends well whatever it finds, because it is restarted until it does.
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stderr, "")
+                return result.stdout
+
+            def kept(query):
+                db = sqlite3.connect(archive)
+                try:
+                    return db.execute(query).fetchall()
+                finally:
+                    db.close()
+
+            # Nothing to read yet: no grief log, no statistics, and a map that does not answer.
+            out = run()
+            self.assertIn("Prism has no database yet", out)
+            self.assertIn("list of players cannot be read", out)
+            self.assertEqual(kept("SELECT count(*) FROM positions"), [(0,)])
+
+            # Three rows in the grief log, a player on the map, and a statistics file.
+            prism_database(prism, [(100, 5, 1, 1, "Stone", None), (101, 6, 2, 1, "Dirt", "{blob}"), (102, 7, 1, None, None, None)])
+            before = prism.read_bytes()
+            listed.write_text(json.dumps({"max": 10, "players": [
+                {"name": "Ada", "uuid": "aaaaaaaa000000000000000000000001", "world": "minecraft_overworld",
+                 "x": 12, "y": 64, "z": -7, "yaw": 90, "health": 20, "armor": 4},
+                {"name": "broken"},
+            ]}))
+            (stats / "aaaaaaaa-0000-0000-0000-000000000001.json").write_text('{"stats": {"minecraft:custom": {"minecraft:jump": 3}}}')
+            (stats / "bbbbbbbb-0000-0000-0000-000000000002.json").write_text('{"stats": {"minecraft:cust')
+            self.assertIn("1 positions, 3 events, 1 snapshots", run())
+            # Every column of Prism's comes across as it was, more than one batch of them.
+            self.assertEqual(kept("SELECT source, activity_id, timestamp, x, action_id, cause_player_id, descriptor, serialized_data FROM prism_activities"), [
+                (0, 1, 100, 5, 1, 1, "Stone", None), (0, 2, 101, 6, 2, 1, "Dirt", "{blob}"), (0, 3, 102, 7, 1, None, None, None),
+            ])
+            self.assertEqual(kept("SELECT source, action_id, action FROM prism_actions"), [(0, 1, "block-break"), (0, 2, "block-place")])
+            self.assertEqual(kept("SELECT player, player_uuid FROM prism_players"), [("Ada", "aaaaaaaa-0000-0000-0000-000000000001")])
+            # The map leaves the dashes out of a UUID. The archive has them, like the other sources.
+            self.assertEqual(kept("SELECT uuid, name FROM players"), [("aaaaaaaa-0000-0000-0000-000000000001", "Ada")])
+            self.assertEqual(kept("SELECT world, x, y, z, yaw, health, armor FROM positions"), [("minecraft_overworld", 12, 64, -7, 90, 20, 4)])
+            ((uuid, text),) = kept("SELECT uuid, stats FROM totals")
+            self.assertEqual(uuid, "aaaaaaaa-0000-0000-0000-000000000001")
+            self.assertEqual(json.loads(zlib.decompress(text)), {"stats": {"minecraft:custom": {"minecraft:jump": 3}}})
+            # The grief log itself is not touched.
+            self.assertEqual(prism.read_bytes(), before)
+
+            # Looking again keeps nothing twice, but notes where everyone is now.
+            self.assertIn("1 positions, 0 events, 0 snapshots", run())
+            self.assertEqual(kept("SELECT count(*) FROM prism_activities"), [(3,)])
+            self.assertEqual(kept("SELECT count(*) FROM totals"), [(1,)])
+
+            # Prism writes more, deletes its oldest rows, renames a player and gains a column.
+            db = sqlite3.connect(prism)
+            db.execute("ALTER TABLE prism_activities ADD COLUMN reversed boolean")
+            db.execute("INSERT INTO prism_activities (timestamp, x, action_id, reversed) VALUES (103, 8, 2, 1)")
+            db.execute("DELETE FROM prism_activities WHERE activity_id < 3")
+            db.execute("UPDATE prism_players SET player = 'Ada_L'")
+            db.execute("INSERT INTO prism_actions VALUES (3, 'item-trade')")
+            db.commit()
+            db.close()
+            self.assertIn("1 events", run())
+            self.assertEqual(kept("SELECT source, activity_id, x, reversed FROM prism_activities"), [(0, 1, 5, None), (0, 2, 6, None), (0, 3, 7, None), (0, 4, 8, 1)])
+            self.assertEqual(kept("SELECT action FROM prism_actions ORDER BY action_id"), [("block-break",), ("block-place",), ("item-trade",)])
+            # Names are all read again each hour, so a new name arrives then.
+            self.assertEqual(kept("SELECT player FROM prism_players"), [("Ada",)])
+            db = sqlite3.connect(archive)
+            db.execute("UPDATE meta SET v = 0 WHERE k = 'prism_names_at'")
+            db.commit()
+            db.close()
+            run()
+            self.assertEqual(kept("SELECT player FROM prism_players"), [("Ada_L",)])
+
+            # Prism deleting every row it has is not another database: its numbers carry on.
+            db = sqlite3.connect(prism)
+            db.execute("DELETE FROM prism_activities")
+            db.commit()
+            self.assertNotIn("source", run())
+            db.execute("INSERT INTO prism_activities (timestamp, x, action_id) VALUES (104, 9, 1)")
+            db.commit()
+            db.close()
+            self.assertIn("1 events", run())
+            self.assertEqual(kept("SELECT source, activity_id FROM prism_activities ORDER BY 1, 2")[-1], (0, 5))
+
+            # A grief log that is replaced starts its numbers again. Its rows are kept
+            # apart from the old ones, which stay.
+            prism.unlink()
+            prism_database(prism, [(200, 1, 2, 1, "Glass", None)])
+            out = run()
+            self.assertIn("kept as source 1", out)
+            self.assertIn("1 events", out)
+            self.assertEqual(kept("SELECT source, count(*) FROM prism_activities GROUP BY source"), [(0, 5), (1, 1)])
+            self.assertEqual(kept("SELECT source, action FROM prism_actions WHERE action_id = 1 ORDER BY source"), [(0, "block-break"), (1, "block-break")])
+            self.assertEqual(kept("SELECT source, activity_id, descriptor FROM prism_activities WHERE source = 1"), [(1, 1, "Glass")])
+
+            # The game saves the statistics again, and someone else joins the map.
+            path = stats / "aaaaaaaa-0000-0000-0000-000000000001.json"
+            path.write_text('{"stats": {"minecraft:custom": {"minecraft:jump": 9}}}')
+            os.utime(path, (2_000_000_000, 2_000_000_000))
+            listed.write_text(json.dumps({"players": [
+                {"name": "Ada_L", "uuid": "aaaaaaaa000000000000000000000001", "world": "minecraft_the_nether", "x": 1.6, "y": 2, "z": 3},
+                {"name": "Bo", "uuid": "bbbbbbbb000000000000000000000002", "world": "minecraft_overworld", "x": 4, "y": 5, "z": 6},
+            ]}))
+            self.assertIn("2 positions, 0 events, 1 snapshots", run())
+            self.assertEqual(kept("SELECT uuid, t, length(stats) > 0 FROM totals ORDER BY t")[-1], ("aaaaaaaa-0000-0000-0000-000000000001", 2_000_000_000, 1))
+            self.assertEqual(kept("SELECT name FROM players ORDER BY player"), [("Ada_L",), ("Bo",)])
+            self.assertEqual(
+                kept("SELECT name, world, x FROM positions JOIN players USING (player) WHERE t = (SELECT max(t) FROM positions) ORDER BY name"),
+                [("Ada_L", "minecraft_the_nether", 2), ("Bo", "minecraft_overworld", 4)],
+            )
+            # Looks close together are one stretch of watching.
+            ((start, end, samples),) = kept('SELECT start, "end", samples FROM watches')
+            self.assertGreaterEqual(end, start)
+            self.assertGreaterEqual(samples, 2)
+
+            # An archive that cannot be opened is said, and tried again, without stopping.
+            out = run(ARCHIVE_FILE=(stats / "aaaaaaaa-0000-0000-0000-000000000001.json" / "x.db").as_posix())
+            self.assertIn("The archive cannot be used", out)
+
     def test_default_deny_both_ways(self):
         spec = self.objects[("NetworkPolicy", "default-deny")]["spec"]
         self.assertEqual(spec["podSelector"], {})
@@ -445,7 +682,7 @@ class DripcraftPublicTests(unittest.TestCase):
             self.assertEqual(len(rule["from"]), 1, policy)
         return {r["from"][0]["podSelector"]["matchLabels"]["app.kubernetes.io/name"]: r["ports"] for r in rules}
 
-    def test_only_the_agent_and_the_map_proxy_reach_the_server(self):
+    def test_only_the_agent_the_map_proxy_and_the_archive_reach_the_server(self):
         self.assertEqual(self.ingress_by_source("minecraft-ingress"), {
             "playit-agent": [
                 {"protocol": "TCP", "port": 25565},
@@ -453,6 +690,7 @@ class DripcraftPublicTests(unittest.TestCase):
                 {"protocol": "UDP", "port": 19132},
             ],
             "web-map": [{"protocol": "TCP", "port": 8080}],
+            "archive": [{"protocol": "TCP", "port": 8080}],
         })
 
     def test_only_the_agent_reaches_the_map_proxy(self):

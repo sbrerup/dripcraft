@@ -8,6 +8,7 @@ resources:
 - playit.yaml
 - uptime-check.yaml
 - web-map.yaml
+- archive.yaml
 - network-policies.yaml
 configMapGenerator:
 - name: paper-config
@@ -26,6 +27,9 @@ configMapGenerator:
 - name: web-map
   files:
   - Caddyfile
+- name: archive
+  files:
+  - archive.py
 - name: player-stats
   files:
   - player-stats.sh

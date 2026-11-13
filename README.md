@@ -27,7 +27,8 @@ browser -> playit edge -> playit-agent pod -> web-map pod (Caddy, members' hub)
 Network policy limits both servers to HTTPS and DNS, and the agent to DNS, the
 public internet, the servers' game and voice ports and the web map's proxy. None of
 them can reach the LAN, the tailnet or the rest of the cluster, and the two servers
-cannot reach each other.
+cannot reach each other. The [archive](#the-archive) reaches the survival server's map
+port and nothing else, not even the internet.
 
 Most of this page is about the survival server. The second one is described under
 [Creative server](#creative-server).
@@ -259,8 +260,8 @@ on the tunnel's page, and restart. The console then logs
 ## Grief log
 
 Prism records who placed, broke or took what, in `plugins/prism/prism.db` on the data
-volume, and it purges records older than six weeks. Players cannot use it. An operator
-uses it in game:
+volume, and it purges records older than six weeks. The [archive](#the-archive) keeps a
+copy of them for good. Players cannot use it. An operator uses it in game:
 
 - `/pr wand inspect`, then left-click a block or chest to see who changed it. A right
   click looks at the space next to the block instead. `/pr wand` puts the wand away.
@@ -280,6 +281,88 @@ Chests need care, because Prism can give back more than was taken:
 
 So look in the chest before and after a rollback. Blocks, doors, broken chests with
 their contents, TNT damage and lava all roll back exactly.
+
+## The archive
+
+The server notes far more about what players do than it keeps. The `archive` pod gathers
+it into one SQLite database that only grows, `archive.db` on a volume of its own, so that
+what happened can still be asked about later. Nothing is built on it yet and nothing in it
+is shown anywhere. It is the ground for what the hub does next.
+
+It keeps three things, as the sources gave them, with nothing worked out. A mistake in
+reading them can then be put right later without anything having been lost.
+
+- **Everything Prism writes.** [Prism](#grief-log) notes every block broken or placed,
+  every item put into or taken from a chest, picked up, dropped or traded, every death,
+  and more, each with who, where and when. It deletes them after six weeks. Every minute
+  the archive copies the new rows into tables with Prism's own names and columns:
+  `prism_activities` for what happened, and `prism_actions`, `prism_blocks`,
+  `prism_items`, `prism_entity_types`, `prism_players`, `prism_worlds` and the rest for
+  what its numbers stand for. The first time it runs, it copies everything Prism still has.
+- **Where everyone is.** squaremap knows where each player on the map is, and keeps
+  nothing. Every ten seconds the archive asks it, and writes a row to `positions` for each
+  player: the world, the block they are at, which way they face, their health and armour.
+  `watches` has the stretches of time during which it was asking, so a gap in someone's
+  positions can be told from a gap in the watching. A player the map hides (invisible, in
+  spectator mode or wearing a carved pumpkin) is not seen.
+- **The game's counters over time.** The game counts what each player has done as totals,
+  with no history. Each time it has saved a player's statistics file, which is about every
+  five minutes while they play, the archive keeps the whole file in `totals`, compressed
+  with zlib. The difference between two of them is what the player did in between.
+
+Times are in seconds since 1970, in UTC. Players are known by UUID, with dashes, in all
+three.
+
+Every copied row has `source` in front of Prism's own columns. It is 0, and goes up by one
+if Prism's database is ever replaced, because its numbering then starts again and means
+other things. Rows of the old and the new database never pass for each other that way. A
+newer Prism with more columns is followed without a change here.
+
+Prism got about a million rows in the server's first week. A row takes 85 bytes in the
+archive, with its indexes, so that is about 90 MB a week and under 5 GB a year. Positions
+and counters add little to that. The volume is on the same disk as the world, which had
+800 GB free when this was set up.
+
+The server's logs, with every join, leave and death message, are not copied. The server
+keeps those itself, in `logs`. The creative server is left out.
+
+### Where it runs and what it can reach
+
+It is `manifests/archive.py`, run by the `archive` pod from `manifests/archive.yaml`. It
+has a pod of its own, so that changing the hub never interrupts it, and a fault in it never
+takes the hub or the map off the tunnel.
+
+- It mounts the survival server's folder read-only and opens Prism's database for reading
+  only, so it cannot change the world or the grief log.
+- Network policy lets it reach the server's map port, to ask who is on the map, and
+  nothing else. It has no way to the internet and nothing can connect to it, so what it
+  holds stays where it is.
+
+The archive says where every member was and what they did, in far more detail than the hub
+shows. Treat it as private. Anything made from it for the hub should be decided on purpose,
+because anyone who knows the server's address can read the hub.
+
+The volume is the `archive` claim, which Argo CD never removes. Like the world, it is not on
+a separate disk, and the server's periodic backups do not include it.
+
+### Looking into it
+
+The pod logs once an hour how much it kept, and any source it cannot read:
+
+```bash
+kubectl -n dripcraft-public logs deploy/archive
+```
+
+To ask the archive something, open it for reading only. This counts what has happened, by
+kind:
+
+```bash
+kubectl -n dripcraft-public exec deploy/archive -- python3 -c '
+import sqlite3
+db = sqlite3.connect("file:/archive/archive.db?mode=ro", uri=True)
+for row in db.execute("SELECT action, count(*) FROM prism_activities JOIN prism_actions USING (source, action_id) GROUP BY action ORDER BY 2 DESC"):
+    print(*row)'
+```
 
 ## Chest sorting
 
@@ -755,4 +838,5 @@ python -m unittest discover -s tests
 ```
 
 The tests need PyYAML and `kubectl`. The one that runs `manifests/player-stats.sh` also
-needs `sh` and `jq`, and is skipped without them.
+needs `sh` and `jq`, and is skipped without them. The one that runs `manifests/archive.py`
+needs nothing more than Python.

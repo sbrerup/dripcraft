@@ -3,16 +3,22 @@
 The test that runs player-stats.sh also needs sh and jq, and is skipped without them.
 """
 import gzip
+import importlib.util
 import json
 import os
 import pathlib
 import re
 import shutil
+import socket
 import sqlite3
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
+import urllib.error
+import urllib.request
 import zlib
 
 import yaml
@@ -455,11 +461,12 @@ class DripcraftPublicTests(unittest.TestCase):
         self.assertIs(volume["persistentVolumeClaim"]["readOnly"], True)
         mount = next(m for m in self.archive_container()["volumeMounts"] if m["name"] == "server")
         self.assertIs(mount["readOnly"], True)
-        # Prism's database is opened for reading only as well.
+        # Prism's database is opened for reading only as well. So is the archive by the
+        # feed. The one connection that can write is the gathering's own, to the archive.
         script = (ROOT / "manifests" / "archive.py").read_text(encoding="utf-8")
-        self.assertIn('"?mode=ro"', script)
-        self.assertEqual(len(re.findall(r"sqlite3\.connect\(", script)), 3)
-        self.assertEqual(len(re.findall(r"sqlite3\.connect\(address", script)), 2)
+        self.assertEqual(script.count('"?mode=ro"'), 2)
+        self.assertEqual(len(re.findall(r"sqlite3\.connect\(", script)), 4)
+        self.assertEqual(len(re.findall(r"sqlite3\.connect\(address", script)), 3)
 
     def test_archive_reads_the_survival_servers_folder_and_world(self):
         container = self.archive_container()
@@ -510,7 +517,7 @@ class DripcraftPublicTests(unittest.TestCase):
         script = (ROOT / "manifests" / "archive.py").read_text(encoding="utf-8")
         self.assertNotIn("temp_store", script)
 
-    def test_what_the_archive_holds_cannot_leave_it(self):
+    def test_archive_reaches_only_the_map_and_only_the_ledger_reads_it(self):
         # It reaches the cluster's DNS and the survival server's map port, where it asks
         # who is on the map, and nothing else: no address on the internet or anywhere.
         rules = self.egress("archive-egress")
@@ -523,13 +530,43 @@ class DripcraftPublicTests(unittest.TestCase):
         script = (ROOT / "manifests" / "archive.py").read_text(encoding="utf-8")
         self.assertIn('PLAYERS_URL = os.environ.get("PLAYERS_URL", "http://minecraft:8080/tiles/players.json")', script)
         self.assertEqual(re.findall(r"https?://[^\"' )]+", script), ["http://minecraft:8080/tiles/players.json"])
-        # Nothing may connect to it. No policy but the one that denies everything names it.
-        for (kind, name), policy in self.objects.items():
-            if kind == "NetworkPolicy" and "Ingress" in policy["spec"]["policyTypes"] and name != "default-deny":
-                self.assertNotEqual(policy["spec"]["podSelector"].get("matchLabels", {}).get("app.kubernetes.io/name"), "archive")
-        # And no port is published.
-        self.assertNotIn("ports", self.archive_container())
-        self.assertNotIn(("Service", "archive"), self.objects)
+
+        # One policy lets anything connect to it, and it lets in one source: pods with
+        # the ledger's name, in the ledger's namespace, on the feed's port.
+        labels = self.objects[("Deployment", "archive")]["spec"]["template"]["metadata"]["labels"]
+        letting_in = [
+            name for (kind, name), policy in self.objects.items()
+            if kind == "NetworkPolicy" and policy["spec"].get("ingress")
+            and all(labels.get(k) == v for k, v in policy["spec"]["podSelector"].get("matchLabels", {}).items())
+        ]
+        self.assertEqual(letting_in, ["archive-ingress"])
+        spec = self.objects[("NetworkPolicy", "archive-ingress")]["spec"]
+        self.assertEqual(spec["podSelector"], {"matchLabels": {"app.kubernetes.io/name": "archive"}})
+        self.assertEqual(spec["policyTypes"], ["Ingress"])
+        (rule,) = spec["ingress"]
+        # Both selectors are in one entry, so both must hold. As two entries, either would do.
+        self.assertEqual(rule["from"], [{
+            "namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "dripcraft-ledger"}},
+            "podSelector": {"matchLabels": {"app.kubernetes.io/name": "dripcraft-ledger"}},
+        }])
+        self.assertEqual(rule["ports"], [{"protocol": "TCP", "port": 8080}])
+
+        # The pod, its Service and the script agree on that port, and there is no other.
+        container = self.archive_container()
+        self.assertEqual(container["ports"], [{"name": "feed", "containerPort": 8080, "protocol": "TCP"}])
+        self.assertIn('FEED_PORT = int(os.environ.get("FEED_PORT", "8080"))', script)
+        self.assertNotIn("FEED_PORT", [e["name"] for e in container["env"]])
+        service = self.objects[("Service", "archive")]["spec"]
+        self.assertEqual(service["selector"], {"app.kubernetes.io/name": "archive"})
+        self.assertEqual(service["ports"], [{"name": "feed", "port": 8080, "targetPort": "feed", "protocol": "TCP"}])
+        # Reached by name from inside the cluster, and from nowhere else.
+        self.assertEqual(service.get("type", "ClusterIP"), "ClusterIP")
+        self.assertNotIn("clusterIP", service)
+
+        # The feed gives out and takes nothing in.
+        self.assertEqual(re.findall(r"def do_[A-Z]+", script), ["def do_GET"])
+        # Nothing restarts the pod, and the gathering with it, because the feed does not answer.
+        self.assertNotIn("livenessProbe", container)
 
     def test_archive_keeps_what_the_server_notes(self):
         script = (ROOT / "manifests" / "archive.py").as_posix()
@@ -680,6 +717,374 @@ class DripcraftPublicTests(unittest.TestCase):
             # An archive that cannot be opened is said, and tried again, without stopping.
             out = run(ARCHIVE_FILE=(stats / "aaaaaaaa-0000-0000-0000-000000000001.json" / "x.db").as_posix())
             self.assertIn("The archive cannot be used", out)
+
+    # The feed.
+
+    ADA = "aaaaaaaa-0000-0000-0000-000000000001"
+    BO = "bbbbbbbb-0000-0000-0000-000000000002"
+    # Prism's tables as its schema version 403 has them, which is what the server runs.
+    PRISM_TABLES = """
+        CREATE TABLE prism_actions (action_id INTEGER PRIMARY KEY, action varchar(25));
+        CREATE TABLE prism_worlds (world_id INTEGER PRIMARY KEY, world varchar(255), world_uuid char(36));
+        CREATE TABLE prism_blocks (block_id INTEGER PRIMARY KEY, ns varchar(55), name varchar(55), data varchar(255), translation_key varchar(155));
+        CREATE TABLE prism_items (item_id INTEGER PRIMARY KEY, material varchar(45), data clob, airtag_id bigint);
+        CREATE TABLE prism_entity_types (entity_type_id INTEGER PRIMARY KEY, entity_type varchar(45), translation_key varchar(155));
+        CREATE TABLE prism_players (player_id INTEGER PRIMARY KEY, player varchar(32), player_uuid char(36));
+        CREATE TABLE prism_causes (cause_id INTEGER PRIMARY KEY, cause varchar(155));
+        CREATE TABLE prism_activities (
+            activity_id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp bigint, world_id bigint, x INT, y INT, z INT,
+            action_id bigint, affected_item_id bigint, affected_item_quantity INT, affected_block_id bigint,
+            replaced_block_id bigint, affected_entity_type_id bigint, affected_player_id bigint, cause_id bigint,
+            cause_player_id bigint, cause_entity_type_id bigint, cause_block_id bigint, descriptor varchar(255),
+            metadata varchar(255), serializer_version INT, serialized_data clob, reversed boolean);
+    """
+
+    def archive_script(self):
+        """manifests/archive.py as a module, with nothing of it started."""
+        spec = importlib.util.spec_from_file_location("archive_script", ROOT / "manifests" / "archive.py")
+        module = importlib.util.module_from_spec(spec)
+        writes, sys.dont_write_bytecode = sys.dont_write_bytecode, True
+        try:
+            spec.loader.exec_module(module)
+        finally:
+            sys.dont_write_bytecode = writes
+        return module
+
+    def prism_like_the_servers(self, path, names, rows):
+        """A grief log with Prism's own tables, the given names for its numbers, and the given rows."""
+        db = sqlite3.connect(path)
+        db.executescript(self.PRISM_TABLES)
+        for table, values in names.items():
+            db.executemany(f"INSERT INTO {table} VALUES ({', '.join('?' * len(values[0]))})", values)
+        for row in rows:
+            db.execute(f"INSERT INTO prism_activities ({', '.join(row)}) VALUES ({', '.join('?' * len(row))})", list(row.values()))
+        db.commit()
+        db.close()
+
+    def gather_once(self, server, archive):
+        """Runs the gathering for one look at each source, as the pod does over and over."""
+        env = {
+            **os.environ, "ONCE": "1", "SERVER_DIR": server.as_posix(), "ARCHIVE_FILE": archive.as_posix(),
+            "PLAYERS_URL": (server / "nobody.json").as_uri(),
+        }
+        script = (ROOT / "manifests" / "archive.py").as_posix()
+        result = subprocess.run([sys.executable, script], env=env, capture_output=True, text=True, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, "")
+        return result.stdout
+
+    def test_feed_gives_out_prisms_rows_in_order_with_their_names(self):
+        module = self.archive_script()
+        # The numbers the ledger is written against.
+        self.assertEqual((module.FEED_ROWS, module.FEED_MOST), (1000, 5000))
+
+        with tempfile.TemporaryDirectory() as folder:
+            server = pathlib.Path(folder) / "server"
+            prism = server / "plugins" / "prism" / "prism.db"
+            prism.parent.mkdir(parents=True)
+            archive = pathlib.Path(folder) / "kept" / "archive.db"
+            module.ARCHIVE = archive.as_posix()
+
+            listening = module.http.server.ThreadingHTTPServer(("127.0.0.1", 0), module.Feed)
+            self.addCleanup(listening.server_close)
+            self.addCleanup(listening.shutdown)
+            threading.Thread(target=listening.serve_forever, daemon=True).start()
+            address = f"http://127.0.0.1:{listening.server_address[1]}"
+            direct = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+            def ask(question="", path="/feed/activities", method="GET"):
+                request = urllib.request.Request(address + path + ("?" + question if question else ""), method=method)
+                try:
+                    with direct.open(request, timeout=10) as reply:
+                        return reply.status, reply.headers["Content-Type"], reply.read().decode()
+                except urllib.error.HTTPError as refused:
+                    return refused.code, refused.headers["Content-Type"], refused.read().decode()
+
+            def page(question=""):
+                status, kind, text = ask(question)
+                self.assertEqual((status, kind), (200, "application/json"), text)
+                answer = json.loads(text)
+                self.assertEqual(list(answer), ["rows", "next"])
+                return answer["rows"], answer["next"]
+
+            def numbers(question=""):
+                rows, last = page(question)
+                return [row["id"] for row in rows], last
+
+            def kept(query):
+                db = sqlite3.connect(archive)
+                try:
+                    return db.execute(query).fetchall()
+                finally:
+                    db.close()
+
+            def note(statement):
+                db = sqlite3.connect(archive)
+                db.execute(statement)
+                db.commit()
+                db.close()
+
+            # No archive yet, and then an archive with nothing of Prism's in it. There are
+            # no rows, and the cursor to go on with is the one that was asked with.
+            self.assertEqual(page(), ([], ""))
+            self.assertEqual(page("after=0:5"), ([], "0:5"))
+            self.gather_once(server, archive)
+            self.assertTrue(archive.exists())
+            self.assertEqual(page(), ([], ""))
+            self.assertEqual(page("after=0:5"), ([], "0:5"))
+
+            self.prism_like_the_servers(prism, {
+                "prism_actions": [(1, "block-break"), (2, "block-place"), (3, "item-insert"), (4, "player-death"), (5, "sign-edit"), (6, "entity-death")],
+                "prism_worlds": [(1, "dripcraft", "w-1"), (2, "dripcraft_nether", "w-2")],
+                "prism_blocks": [
+                    (1, "minecraft", "stone", "", "block.minecraft.stone"), (2, "minecraft", "oak_log", "[axis=y]", "block.minecraft.oak_log"),
+                    (3, "minecraft", "air", "", "block.minecraft.air"), (4, "minecraft", "oak_sign", "[rotation=8]", "block.minecraft.oak_sign"),
+                    (5, "minecraft", "tnt", "", "block.minecraft.tnt"), (6, "minecraft", "dirt", "", "block.minecraft.dirt"),
+                ],
+                "prism_items": [(1, "emerald", '{DataVersion:5023,id:"minecraft:emerald"}', None)],
+                "prism_entity_types": [(1, "skeleton", "entity.minecraft.skeleton"), (2, "zombie", "entity.minecraft.zombie")],
+                "prism_players": [(1, "Ada", self.ADA), (2, "Bo", self.BO)],
+                "prism_causes": [(1, "fall")],
+            }, [
+                dict(timestamp=100, world_id=1, x=1, y=2, z=3, action_id=1, affected_block_id=1, cause_player_id=1, reversed=0),
+                dict(timestamp=101, world_id=1, x=4, y=5, z=6, action_id=2, affected_block_id=2, replaced_block_id=3, cause_player_id=1, reversed=0),
+                dict(timestamp=102, world_id=1, x=7, y=8, z=9, action_id=3, affected_item_id=1, affected_item_quantity=3, cause_player_id=1,
+                     descriptor="Emerald", reversed=0),
+                dict(timestamp=103, world_id=2, x=1, y=1, z=1, action_id=4, affected_player_id=2, cause_id=1, reversed=0),
+                dict(timestamp=104, world_id=2, x=2, y=2, z=2, action_id=4, affected_player_id=2, cause_entity_type_id=1, reversed=0),
+                dict(timestamp=105, world_id=1, x=3, y=3, z=3, action_id=5, affected_block_id=4, cause_player_id=1, descriptor="private words",
+                     metadata='{"lines":["private words"]}', serializer_version=5023, serialized_data='{front_text:"private words"}', reversed=0),
+                # Written before the row after it, and it happened later.
+                dict(timestamp=110, world_id=1, action_id=6, affected_entity_type_id=2, cause_player_id=1, serializer_version=5023,
+                     serialized_data="{CanPickUpLoot:1b}", reversed=0),
+                dict(timestamp=107, world_id=1, action_id=1, affected_block_id=6, cause_block_id=5, metadata='{"note":"kept"}', reversed=1),
+            ])
+            self.assertIn("8 events", self.gather_once(server, archive))
+
+            # Each row with names where Prism has numbers, and nothing that is empty.
+            ada, bo = {"uuid": self.ADA, "name": "Ada"}, {"uuid": self.BO, "name": "Bo"}
+            expected = [
+                {"cursor": "0:1", "source": 0, "id": 1, "at": 100, "action": "block-break", "world": "dripcraft", "x": 1, "y": 2, "z": 3,
+                 "block": "minecraft:stone", "causePlayer": ada, "reversed": False},
+                {"cursor": "0:2", "source": 0, "id": 2, "at": 101, "action": "block-place", "world": "dripcraft", "x": 4, "y": 5, "z": 6,
+                 "block": "minecraft:oak_log", "blockData": "[axis=y]", "replacedBlock": "minecraft:air", "causePlayer": ada, "reversed": False},
+                {"cursor": "0:3", "source": 0, "id": 3, "at": 102, "action": "item-insert", "world": "dripcraft", "x": 7, "y": 8, "z": 9,
+                 "item": "emerald", "quantity": 3, "causePlayer": ada, "reversed": False},
+                # A death: who died is "player", and what of is a named cause or a creature.
+                {"cursor": "0:4", "source": 0, "id": 4, "at": 103, "action": "player-death", "world": "dripcraft_nether", "x": 1, "y": 1, "z": 1,
+                 "player": bo, "cause": "fall", "reversed": False},
+                {"cursor": "0:5", "source": 0, "id": 5, "at": 104, "action": "player-death", "world": "dripcraft_nether", "x": 2, "y": 2, "z": 2,
+                 "player": bo, "causeEntity": "skeleton", "reversed": False},
+                {"cursor": "0:6", "source": 0, "id": 6, "at": 105, "action": "sign-edit", "world": "dripcraft", "x": 3, "y": 3, "z": 3,
+                 "block": "minecraft:oak_sign", "blockData": "[rotation=8]", "causePlayer": ada, "reversed": False},
+                {"cursor": "0:7", "source": 0, "id": 7, "at": 110, "action": "entity-death", "world": "dripcraft", "entity": "zombie",
+                 "causePlayer": ada, "reversed": False},
+                {"cursor": "0:8", "source": 0, "id": 8, "at": 107, "action": "block-break", "world": "dripcraft", "block": "minecraft:dirt",
+                 "causeBlock": "minecraft:tnt", "reversed": True},
+            ]
+
+            # A page of them, then the next from where that one ended, then nothing more.
+            self.assertEqual(page("limit=3"), (expected[:3], "0:3"))
+            self.assertEqual(page("after=0:3"), (expected[3:], "0:8"))
+            self.assertEqual(page("after=0:8"), ([], "0:8"))
+            self.assertEqual(page("after="), (expected, "0:8"))
+
+            # What a member may have written is not given out: not what is on a sign, not
+            # the name of a thing, which they can change, and not what Prism keeps of
+            # the thing itself. All of it is still in the archive.
+            text = ask()[2]
+            self.assertNotIn("private words", text)
+            self.assertNotIn("Emerald", text)
+            self.assertNotIn("kept", text)
+            self.assertNotIn("CanPickUpLoot", text)
+            for column in ("descriptor", "metadata", "serial"):
+                self.assertNotIn(column, text)
+            self.assertEqual(
+                kept("SELECT descriptor, metadata, serialized_data FROM prism_activities WHERE activity_id = 6"),
+                [("private words", '{"lines":["private words"]}', '{front_text:"private words"}')],
+            )
+
+            # The rows end before the first that happened later than "until". Row 8
+            # happened at 107, but row 7 before it at 110, and no row is passed over.
+            self.assertEqual(numbers("until=104"), ([1, 2, 3, 4, 5], "0:5"))
+            self.assertEqual(numbers("until=108"), ([1, 2, 3, 4, 5, 6], "0:6"))
+            self.assertEqual(numbers("after=0:6&until=108"), ([], "0:6"))
+            self.assertEqual(numbers("until=99"), ([], ""))
+            self.assertEqual(numbers("after=0:5&until=110&limit=2"), ([6, 7], "0:7"))
+            self.assertEqual(numbers("until=&limit="), ([1, 2, 3, 4, 5, 6, 7, 8], "0:8"))
+
+            # How many rows: at least one, at the most FEED_MOST, and FEED_ROWS unless asked.
+            self.assertEqual(numbers("limit=0"), ([1], "0:1"))
+            module.FEED_MOST = 2
+            self.assertEqual(numbers("limit=100"), ([1, 2], "0:2"))
+            module.FEED_MOST, module.FEED_ROWS = 5000, 4
+            self.assertEqual(numbers(), ([1, 2, 3, 4], "0:4"))
+            module.FEED_ROWS = 1000
+
+            # A question that cannot be understood is refused, and the answer says why.
+            for question in ("after=x", "after=5", "after=0:", "after=-1:5", "after=0:5:1", "until=soon", "until=-5",
+                             "limit=many", "limit=1.5", "limit=-1"):
+                status, kind, text = ask(question)
+                self.assertEqual((status, kind), (400, "application/json"), question)
+                self.assertEqual(list(json.loads(text)), ["error"], question)
+            # There is nothing else at the feed's address, and nothing can be sent to it.
+            for path in ("/", "/feed", "/feed/activities/", "/feed/positions", "/archive.db"):
+                status, kind, text = ask(path=path)
+                self.assertEqual((status, kind), (404, "application/json"), path)
+            for method in ("POST", "PUT", "DELETE", "HEAD"):
+                self.assertEqual(ask(method=method)[0], 501, method)
+
+            # A row is given once what its numbers stand for has been copied as well.
+            # The gathering notes how far that is, each time it has copied the names.
+            self.assertEqual(kept("SELECT v FROM meta WHERE k = 'prism_named'"), [("0:8",)])
+            note("UPDATE meta SET v = '0:2' WHERE k = 'prism_named'")
+            self.assertEqual(numbers(), ([1, 2], "0:2"))
+            note("DELETE FROM meta WHERE k = 'prism_named'")
+            self.assertEqual(numbers(), ([], ""))
+            self.gather_once(server, archive)
+            self.assertEqual(numbers(), ([1, 2, 3, 4, 5, 6, 7, 8], "0:8"))
+
+            # Rows are found by their number, in order. Nothing is sorted and no table is
+            # read from end to end, however much the archive holds.
+            db = sqlite3.connect(archive)
+            statement, _ = module.feed_statement(db)
+            plan = [step[3] for step in db.execute("EXPLAIN QUERY PLAN " + statement, (0, 3, 0, 8, 10))]
+            db.close()
+            self.assertTrue(plan[0].startswith("SEARCH a USING INDEX sqlite_autoindex_prism_activities_1 "), plan)
+            for step in plan:
+                self.assertNotIn("SCAN", step, plan)
+                self.assertNotIn("TEMP B-TREE", step, plan)
+
+            # A grief log that is replaced numbers its rows and its names from one again.
+            # Its rows come after the old ones, each named by its own source's tables.
+            prism.unlink()
+            self.prism_like_the_servers(prism, {
+                "prism_actions": [(1, "block-place")],
+                "prism_worlds": [(1, "dripcraft", "w-1")],
+                "prism_blocks": [(1, "minecraft", "glass", "", "block.minecraft.glass")],
+                "prism_players": [(1, "Bo", self.BO)],
+            }, [dict(timestamp=200, world_id=1, x=9, y=9, z=9, action_id=1, affected_block_id=1, cause_player_id=1, reversed=0)])
+            self.assertIn("kept as source 1", self.gather_once(server, archive))
+            newer = {"cursor": "1:1", "source": 1, "id": 1, "at": 200, "action": "block-place", "world": "dripcraft", "x": 9, "y": 9, "z": 9,
+                     "block": "minecraft:glass", "causePlayer": bo, "reversed": False}
+            self.assertEqual(page("after=0:8"), ([newer], "1:1"))
+            self.assertEqual(page(), (expected + [newer], "1:1"))
+            self.assertEqual(page("after=1:1"), ([], "1:1"))
+
+    def test_feed_follows_a_prism_with_other_columns(self):
+        # The archive's tables have whatever columns Prism has. The feed gives what is
+        # there, and keeps back the words of a row whose kind it cannot tell.
+        module = self.archive_script()
+        with tempfile.TemporaryDirectory() as folder:
+            server = pathlib.Path(folder) / "server"
+            prism = server / "plugins" / "prism" / "prism.db"
+            prism.parent.mkdir(parents=True)
+            archive = pathlib.Path(folder) / "archive.db"
+            module.ARCHIVE = archive.as_posix()
+            db = sqlite3.connect(prism)
+            db.executescript(f"""
+                CREATE TABLE prism_actions (action_id INTEGER PRIMARY KEY, action varchar(25));
+                CREATE TABLE prism_players (player_id INTEGER PRIMARY KEY, player varchar(32), player_uuid char(36));
+                CREATE TABLE prism_activities (
+                    activity_id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp bigint, x INT, action_id bigint,
+                    cause_player_id bigint, descriptor varchar(255), serialized_data clob);
+                INSERT INTO prism_actions VALUES (1, 'block-break');
+                INSERT INTO prism_players VALUES (1, 'Ada', '{self.ADA}');
+                INSERT INTO prism_activities (timestamp, x, action_id, cause_player_id, descriptor, serialized_data) VALUES
+                    (100, 5, 1, 1, 'Stone', '{{blob}}'), (101, 6, 9, NULL, 'words of an unknown kind', NULL);
+            """)
+            db.commit()
+            db.close()
+            self.assertIn("2 events", self.gather_once(server, archive))
+            self.assertEqual(module.feed_page(), ([
+                {"cursor": "0:1", "source": 0, "id": 1, "at": 100, "action": "block-break", "x": 5,
+                 "causePlayer": {"uuid": self.ADA, "name": "Ada"}},
+                {"cursor": "0:2", "source": 0, "id": 2, "at": 101, "x": 6},
+            ], "0:2"))
+
+    def test_archive_answers_the_feed_while_it_gathers(self):
+        script = (ROOT / "manifests" / "archive.py").as_posix()
+        with tempfile.TemporaryDirectory() as folder:
+            server = pathlib.Path(folder) / "server"
+            prism = server / "plugins" / "prism" / "prism.db"
+            prism.parent.mkdir(parents=True)
+            archive = pathlib.Path(folder) / "kept" / "archive.db"
+            self.prism_like_the_servers(prism, {"prism_actions": [(1, "block-break")]}, [dict(timestamp=100, action_id=1)])
+            direct = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+            def start(port):
+                env = {
+                    **os.environ, "SERVER_DIR": server.as_posix(), "ARCHIVE_FILE": archive.as_posix(),
+                    "PLAYERS_URL": (server / "nobody.json").as_uri(), "FEED_PORT": str(port),
+                }
+                env.pop("ONCE", None)
+                return subprocess.Popen([sys.executable, script], env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+            def stop(process):
+                # Asked to stop, as a pod is, it ends well.
+                process.terminate()
+                try:
+                    out, err = process.communicate(timeout=30)
+                except subprocess.TimeoutExpired:
+                    process.kill()
+                    raise
+                self.assertEqual(process.returncode, 0, err)
+                self.assertEqual(err, "")
+                return out
+
+            def wait_for(what):
+                until = time.monotonic() + 30
+                while time.monotonic() < until:
+                    try:
+                        found = what()
+                        if found:
+                            return found
+                    except (OSError, ValueError, sqlite3.Error):
+                        pass
+                    time.sleep(0.1)
+                self.fail("waited half a minute for the archive")
+
+            def copied():
+                db = sqlite3.connect(archive.as_uri() + "?mode=ro", uri=True)
+                try:
+                    return db.execute("SELECT count(*) FROM prism_activities").fetchone()[0]
+                finally:
+                    db.close()
+
+            def answered():
+                with direct.open(f"http://127.0.0.1:{port}/feed/activities", timeout=5) as reply:
+                    rows = json.load(reply)["rows"]
+                return rows if len(rows) == 2 else None
+
+            # Something else has the feed's port. The gathering goes on without the feed.
+            taken = socket.socket()
+            taken.bind(("", 0))
+            taken.listen()
+            port = taken.getsockname()[1]
+            process = start(port)
+            try:
+                self.assertEqual(wait_for(copied), 1)
+            finally:
+                out = stop(process)
+                taken.close()
+            self.assertIn("The feed cannot be answered", out)
+            self.assertNotIn("Answering the feed", out)
+
+            # With the port free, the rows it gathers are given out by the same process.
+            db = sqlite3.connect(prism)
+            db.execute("INSERT INTO prism_activities (timestamp, action_id) VALUES (101, 1)")
+            db.commit()
+            db.close()
+            process = start(port)
+            try:
+                rows = wait_for(answered)
+            finally:
+                out = stop(process)
+            self.assertEqual(
+                [(row["cursor"], row["at"], row["action"]) for row in rows],
+                [("0:1", 100, "block-break"), ("0:2", 101, "block-break")],
+            )
+            self.assertIn(f"Answering the feed on port {port}.", out)
 
     def test_default_deny_both_ways(self):
         spec = self.objects[("NetworkPolicy", "default-deny")]["spec"]
@@ -938,7 +1343,8 @@ class DripcraftPublicTests(unittest.TestCase):
             [(p["protocol"], p["port"]) for p in service["ports"]],
             [("TCP", 25565), ("UDP", 19132)],
         )
-        fixed = [obj["spec"]["clusterIP"] for (kind, _), obj in self.objects.items() if kind == "Service"]
+        fixed = [obj["spec"]["clusterIP"] for (kind, _), obj in self.objects.items() if kind == "Service" and "clusterIP" in obj["spec"]]
+        self.assertEqual(len(fixed), 3)
         self.assertEqual(len(fixed), len(set(fixed)))
 
     def test_only_the_agent_reaches_the_creative_server(self):

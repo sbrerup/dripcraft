@@ -69,8 +69,10 @@ spec:
             requests:
               cpu: 5m
               memory: 32Mi
+            # Room for someone looking into the archive from inside this pod. A
+            # question that outgrew the limit once stopped the gathering with it.
             limits:
-              memory: 128Mi
+              memory: 256Mi
           volumeMounts:
             - name: server
               mountPath: /server
@@ -81,7 +83,14 @@ spec:
               readOnly: true
             - name: archive
               mountPath: /archive
+            # Where SQLite sorts and groups when a question needs it. Without this
+            # it has nowhere to write, and such a question fails or is done in memory.
+            - name: tmp
+              mountPath: /tmp
       volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 2Gi
         # The survival server's volume, which another pod on the same node can
         # mount. Read-only here, so nothing in this pod can change the world or
         # the grief log.

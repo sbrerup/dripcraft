@@ -499,6 +499,17 @@ class DripcraftPublicTests(unittest.TestCase):
     def test_archive_reserves_almost_no_cpu(self):
         self.assertLessEqual(int(self.archive_container()["resources"]["requests"]["cpu"].rstrip("m")), 5)
 
+    def test_a_question_to_the_archive_sorts_on_disk(self):
+        # The pod's own files cannot be written, so without a folder for temporary files
+        # SQLite cannot sort or group, or does it in memory, which once stopped the pod.
+        mount = next(m for m in self.archive_container()["volumeMounts"] if m["name"] == "tmp")
+        self.assertEqual(mount["mountPath"], "/tmp")
+        volume = next(v for v in self.archive["volumes"] if v["name"] == "tmp")
+        self.assertEqual(list(volume), ["name", "emptyDir"])
+        self.assertNotIn("medium", volume["emptyDir"])
+        script = (ROOT / "manifests" / "archive.py").read_text(encoding="utf-8")
+        self.assertNotIn("temp_store", script)
+
     def test_what_the_archive_holds_cannot_leave_it(self):
         # It reaches the cluster's DNS and the survival server's map port, where it asks
         # who is on the map, and nothing else: no address on the internet or anywhere.

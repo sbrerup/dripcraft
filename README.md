@@ -318,8 +318,8 @@ if Prism's database is ever replaced, because its numbering then starts again an
 other things. Rows of the old and the new database never pass for each other that way. A
 newer Prism with more columns is followed without a change here.
 
-Prism got about a million rows in the server's first week. A row takes 85 bytes in the
-archive, with its indexes, so that is about 90 MB a week and under 5 GB a year. Positions
+Prism got about a million rows in the server's first week. A row takes about 100 bytes in
+the archive, with its indexes, so that is about 100 MB a week and 5 GB a year. Positions
 and counters add little to that. The volume is on the same disk as the world, which had
 800 GB free when this was set up.
 
@@ -363,6 +363,12 @@ db = sqlite3.connect("file:/archive/archive.db?mode=ro", uri=True)
 for row in db.execute("SELECT action, count(*) FROM prism_activities JOIN prism_actions USING (source, action_id) GROUP BY action ORDER BY 2 DESC"):
     print(*row)'
 ```
+
+A question asked this way runs inside the pod that does the gathering and shares its 256 MiB
+of memory. Past that, the pod is stopped and started again, and a few seconds of positions
+are lost. That happened once, on the day it was set up. So let SQLite do its sorting on
+disk, which it does by itself in the pod's `/tmp`, and do not set `temp_store` to memory.
+Read a big answer row by row rather than all at once.
 
 ## Chest sorting
 

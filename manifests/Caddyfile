@@ -1,5 +1,6 @@
-# Serves the web map over HTTPS. playit passes TLS through without ending it, so
-# Caddy gets the certificate from Let's Encrypt itself (see README).
+# Serves the player statistics page and the web map over HTTPS. playit passes TLS
+# through without ending it, so Caddy gets the certificate from Let's Encrypt
+# itself (see README).
 {
 	# Not root, so not 80 and 443. The tunnel's origin maps those to these.
 	http_port 8080
@@ -11,23 +12,29 @@
 # The map's address lives in the web-map Secret, not in this public repository.
 # Until the Secret exists, Caddy serves localhost only and asks for no certificate.
 {$MAP_DOMAIN:localhost} {
-	# Player statistics, at /stats/ (see README). The page is in Git, and the
-	# player-stats container beside Caddy writes its numbers every few minutes.
-	redir /stats /stats/
-	handle_path /stats/data/* {
+	# The web map, at /map/. squaremap asks for everything by relative address,
+	# so it works under a folder with the folder's name taken off.
+	redir /map /map/
+	handle_path /map/* {
+		reverse_proxy minecraft:8080
+	}
+
+	# The page used to be at /stats/.
+	@moved path /stats /stats/
+	redir @moved /
+
+	# Everything else is the player statistics page (see README). The page is in
+	# Git, and the player-stats container beside Caddy writes its numbers, skins
+	# and flags every few minutes.
+	handle_path /data/* {
 		root * /srv/stats-data
 		encode zstd gzip
 		header Cache-Control no-cache
 		file_server
 	}
-	handle_path /stats/* {
+	handle {
 		root * /srv/stats-page
 		encode zstd gzip
 		file_server
-	}
-
-	# Everything else is the map.
-	handle {
-		reverse_proxy minecraft:8080
 	}
 }

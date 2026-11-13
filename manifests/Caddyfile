@@ -19,10 +19,6 @@
 		reverse_proxy minecraft:8080
 	}
 
-	# The page used to be at /stats/.
-	@moved path /stats /stats/
-	redir @moved /
-
 	# Everything else is the player statistics page (see README). The page is in
 	# Git, and the player-stats container beside Caddy writes its numbers, skins
 	# and flags every few minutes.

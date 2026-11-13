@@ -574,7 +574,7 @@ fetched, the page shows a plain figure or the flag emoji.
 
 Caddy serves the page at the root of the address and passes `/map/` on to squaremap with
 the folder's name taken off, which works because squaremap asks for its files by relative
-address. `/stats/`, where the page first was, redirects to the root.
+address.
 
 A player stays on the page after leaving the whitelist, for as long as their file exists.
 A Bedrock player who also plays on Java has two files and appears twice.

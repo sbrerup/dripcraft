@@ -81,7 +81,6 @@ def open_archive():
     db = sqlite3.connect(ARCHIVE, timeout=30)
     db.execute("PRAGMA journal_mode=WAL")
     db.execute("PRAGMA synchronous=NORMAL")
-    db.execute("PRAGMA temp_store=MEMORY")
     db.execute("PRAGMA cache_size=-8000")
     db.executescript(SCHEMA)
     db.commit()

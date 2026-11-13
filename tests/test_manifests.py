@@ -505,7 +505,7 @@ class DripcraftPublicTests(unittest.TestCase):
         mount = next(m for m in self.archive_container()["volumeMounts"] if m["name"] == "tmp")
         self.assertEqual(mount["mountPath"], "/tmp")
         volume = next(v for v in self.archive["volumes"] if v["name"] == "tmp")
-        self.assertEqual(list(volume), ["name", "emptyDir"])
+        self.assertEqual(set(volume), {"name", "emptyDir"})
         self.assertNotIn("medium", volume["emptyDir"])
         script = (ROOT / "manifests" / "archive.py").read_text(encoding="utf-8")
         self.assertNotIn("temp_store", script)

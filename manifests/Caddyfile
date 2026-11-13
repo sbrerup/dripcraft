@@ -19,8 +19,8 @@
 		reverse_proxy minecraft:8080
 	}
 
-	# Everything else is the player statistics page (see README). The page is in
-	# Git, and the player-stats container beside Caddy writes its numbers, skins
+	# Everything else is the members' hub (see README). Its files are in
+	# Git, and the player-stats container beside Caddy writes the numbers, skins
 	# and flags every few minutes.
 	handle_path /data/* {
 		root * /srv/stats-data
@@ -31,6 +31,11 @@
 	handle {
 		root * /srv/stats-page
 		encode zstd gzip
+		# The browser asks whether a file has changed before using its copy, so a
+		# change to the hub shows at once.
+		header Cache-Control no-cache
+		# Every address that is not a file is a page the hub draws itself.
+		try_files {path} /index.html
 		file_server
 	}
 }

@@ -26,3 +26,7 @@ configMapGenerator:
 - name: web-map
   files:
   - Caddyfile
+- name: player-stats
+  files:
+  - player-stats.sh
+  - index.html=player-stats.html

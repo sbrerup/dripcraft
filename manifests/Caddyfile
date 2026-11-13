@@ -11,5 +11,23 @@
 # The map's address lives in the web-map Secret, not in this public repository.
 # Until the Secret exists, Caddy serves localhost only and asks for no certificate.
 {$MAP_DOMAIN:localhost} {
-	reverse_proxy minecraft:8080
+	# Player statistics, at /stats/ (see README). The page is in Git, and the
+	# player-stats container beside Caddy writes its numbers every few minutes.
+	redir /stats /stats/
+	handle_path /stats/data/* {
+		root * /srv/stats-data
+		encode zstd gzip
+		header Cache-Control no-cache
+		file_server
+	}
+	handle_path /stats/* {
+		root * /srv/stats-page
+		encode zstd gzip
+		file_server
+	}
+
+	# Everything else is the map.
+	handle {
+		reverse_proxy minecraft:8080
+	}
 }

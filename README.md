@@ -21,6 +21,7 @@ or the tailnet, and players never see the home IP address.
 player -> playit edge -> playit-agent pod -> minecraft pod (Paper + backup sidecar)
 player -> playit edge -> playit-agent pod -> minecraft-creative pod (Paper + backup sidecar)
 browser -> playit edge -> playit-agent pod -> web-map pod (Caddy) -> minecraft pod (web map)
+browser -> playit edge -> playit-agent pod -> web-map pod (Caddy, player statistics)
 ```
 
 Network policy limits both servers to HTTPS and DNS, and the agent to DNS, the
@@ -528,6 +529,61 @@ BlueMap was considered and rejected. Its 3D tiles would take about 25 GB for the
 overworld alone, it renders every world as soon as it starts, and the image cannot patch
 its settings files. Pl3xMap has only beta builds for 26.x, and Dynmap has none.
 
+## Player statistics
+
+`/stats/` on the web map's address shows what each player has done in the survival world:
+time played, deaths, mobs killed, blocks mined, distance travelled, items crafted and
+trades with villagers. Selecting a player shows what they mined, crafted, used and killed
+most, what killed them, and how they travelled. Everyone stands together on a meadow at
+the top, each in their own skin, with the flag of the country they last joined from and a
+green dot while they are playing. Like the map, anyone who knows the
+server's address can see it, countries included.
+
+The game counts all of this itself, in one file per player under `players/stats` in the
+world folder, so the server needs no plugin and the numbers go back to the world's first
+day. The creative server is left out. The game saves a player's file when it saves the
+world and when they leave, so the numbers for someone who is playing are a few minutes
+old. "Last played" is when their file was last saved.
+
+The `player-stats` container beside Caddy in the `web-map` pod runs
+`manifests/player-stats.sh`. Every five minutes it gathers the files into one, with names
+from the whitelist and the server's name cache, and Caddy serves that with the page,
+`manifests/player-stats.html`. Only that container mounts the server's folder, read-only,
+so Caddy never sees it, and changing the page or the script restarts the proxy and not the
+server.
+
+The page loads nothing from other sites, so a visitor's browser tells nobody else what it
+is looking at. The container fetches what the page needs and Caddy serves the copies:
+
+- **Skins** come from Mojang, once a day for each player. A Bedrock player has none there
+  and gets a plain figure.
+- **Countries** come from the addresses in the server's log, where each login is recorded.
+  They are looked up in DB-IP's free country database, which the container downloads once
+  a month, so no player's address is sent anywhere. The addresses and the database stay
+  in a folder Caddy does not mount, and only the two-letter country reaches the page. The
+  database's licence asks for the link to DB-IP at the foot of the page. A player on a
+  VPN shows the VPN's country, and one whose address is IPv6 or unknown shows no flag.
+- **Flags** are small pictures from flagcdn.com, fetched once for each country, because
+  Windows has no flag emoji.
+
+All of this is kept in temporary folders that go with the pod, so a restart of the proxy fetches
+it again, and reads every log again for the addresses. Until a skin or a flag has been
+fetched, the page shows a plain figure or the flag emoji.
+
+A player stays on the page after leaving the whitelist, for as long as their file exists.
+A Bedrock player who also plays on Java has two files and appears twice.
+
+The container must keep running. If it stops, the pod becomes unready and the web map
+goes off the tunnel, so the script never exits on a file it cannot read or a download
+that fails. Check what it is doing with:
+
+```bash
+kubectl -n dripcraft-public logs deploy/web-map -c player-stats
+```
+
+Plan was considered and rejected. It is a plugin with its own web server and database,
+and it only counts from the day it is installed.
+
 ## The world
 
 The server's files live in the `server` folder of the data volume, and the world in
@@ -645,4 +701,5 @@ fail if the two differ, so change both files in one commit. Both servers then re
 python -m unittest discover -s tests
 ```
 
-The tests need PyYAML and `kubectl`.
+The tests need PyYAML and `kubectl`. The one that runs `manifests/player-stats.sh` also
+needs `sh` and `jq`, and is skipped without them.

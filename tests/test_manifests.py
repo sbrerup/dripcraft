@@ -1,7 +1,14 @@
-"""Run: python -m unittest discover -s tests (requires PyYAML and kubectl)."""
+"""Run: python -m unittest discover -s tests (requires PyYAML and kubectl).
+
+The test that runs player-stats.sh also needs sh and jq, and is skipped without them.
+"""
+import gzip
 import json
+import os
 import pathlib
+import shutil
 import subprocess
+import tempfile
 import unittest
 
 import yaml
@@ -228,6 +235,161 @@ class DripcraftPublicTests(unittest.TestCase):
     def test_map_tiles_stay_out_of_backups(self):
         excludes = self.env("backup")["EXCLUDES"]["value"].split(",")
         self.assertIn("plugins/squaremap/web/tiles", excludes)
+
+    # The player statistics page.
+
+    def web_map_container(self, name):
+        return next(c for c in self.web_map["containers"] if c["name"] == name)
+
+    def test_caddy_is_still_the_proxys_first_container(self):
+        # The tests above read Caddy as the first container.
+        self.assertEqual([c["name"] for c in self.web_map["containers"]], ["caddy", "player-stats"])
+
+    def test_stats_are_read_from_the_survival_servers_folder_and_world(self):
+        stats = self.web_map_container("player-stats")
+        env = {e["name"]: e["value"] for e in stats["env"]}
+        self.assertEqual(env["WORLD"], self.env()["LEVEL"]["value"])
+        mount = next(m for m in stats["volumeMounts"] if m["name"] == "server")
+        server = next(m for m in self.container("minecraft")["volumeMounts"] if m["name"] == "data")
+        self.assertEqual(mount["subPath"], server["subPath"])
+        script = (ROOT / "manifests" / "player-stats.sh").read_text()
+        self.assertIn(f"server=${{SERVER_DIR:-{mount['mountPath']}}}", script)
+        # A StatefulSet names a pod's claim after the template, its own name and the pod's number.
+        statefulset = self.objects[("StatefulSet", "minecraft")]
+        template = statefulset["spec"]["volumeClaimTemplates"][0]["metadata"]["name"]
+        volume = next(v for v in self.web_map["volumes"] if v["name"] == "server")
+        self.assertEqual(volume["persistentVolumeClaim"]["claimName"], f"{template}-{statefulset['metadata']['name']}-0")
+
+    def test_stats_cannot_change_the_world(self):
+        volume = next(v for v in self.web_map["volumes"] if v["name"] == "server")
+        self.assertIs(volume["persistentVolumeClaim"]["readOnly"], True)
+        mount = next(m for m in self.web_map_container("player-stats")["volumeMounts"] if m["name"] == "server")
+        self.assertIs(mount["readOnly"], True)
+
+    def test_caddy_never_sees_the_servers_folder(self):
+        # It holds the RCON password and the whitelist, and Caddy faces the web.
+        self.assertNotIn("server", [m["name"] for m in self.web_map_container("caddy")["volumeMounts"]])
+
+    def test_caddy_serves_the_stats_page_and_numbers_from_where_they_are_mounted(self):
+        mounts = {m["name"]: m for m in self.web_map_container("caddy")["volumeMounts"]}
+        for volume in ("stats-page", "stats-data"):
+            self.assertIn(f"root * {mounts[volume]['mountPath']}\n", self.caddyfile)
+            self.assertIs(mounts[volume]["readOnly"], True)
+        page = next(v for v in self.web_map["volumes"] if v["name"] == "stats-page")["configMap"]
+        self.assertEqual(page["items"], [{"key": "index.html", "path": "index.html"}])
+        self.assertIn("index.html", self.objects_with_prefix("ConfigMap", "player-stats")["data"])
+        # The page asks for data/stats.json beside itself.
+        self.assertIn("handle_path /stats/data/* {", self.caddyfile)
+        self.assertIn('fetch("data/stats.json"', (ROOT / "manifests" / "player-stats.html").read_text(encoding="utf-8"))
+
+    def test_stats_are_written_where_caddy_reads_them(self):
+        script = (ROOT / "manifests" / "player-stats.sh").read_text()
+        written = next(m for m in self.web_map_container("player-stats")["volumeMounts"] if m["name"] == "stats-data")
+        self.assertIn(f"out=${{OUT_FILE:-{written['mountPath']}/stats.json}}", script)
+
+    def test_stats_script_is_mounted_where_it_is_run(self):
+        container = self.web_map_container("player-stats")
+        script = pathlib.PurePosixPath(container["command"][-1])
+        mount = next(m for m in container["volumeMounts"] if m["mountPath"] == str(script.parent))
+        volume = next(v for v in self.web_map["volumes"] if v["name"] == mount["name"])
+        self.assertIn({"key": script.name, "path": script.name}, volume["configMap"]["items"])
+        self.assertIn(script.name, self.objects[("ConfigMap", volume["configMap"]["name"])]["data"])
+
+    def test_stats_use_an_image_the_node_already_has_and_almost_no_cpu(self):
+        container = self.web_map_container("player-stats")
+        self.assertEqual(container["image"], self.container("minecraft")["image"])
+        self.assertLessEqual(int(container["resources"]["requests"]["cpu"].rstrip("m")), 5)
+
+    def test_stats_page_loads_nothing_from_other_sites(self):
+        page = (ROOT / "manifests" / "player-stats.html").read_text(encoding="utf-8")
+        # Skins and flags are copies the script fetched. A link the reader may follow is fine.
+        self.assertNotRegex(page, r"src\s*=\s*[\"'](?:https?:)?//")
+        self.assertNotRegex(page, r"<link|@import|url\(")
+
+    def test_caddy_never_sees_players_addresses(self):
+        # The script keeps addresses and the country database in its state folder.
+        script = (ROOT / "manifests" / "player-stats.sh").read_text()
+        state = next(m for m in self.web_map_container("player-stats")["volumeMounts"] if m["name"] == "stats-state")
+        self.assertIn(f"state=${{STATE_DIR:-{state['mountPath']}}}", script)
+        self.assertNotIn("stats-state", [m["name"] for m in self.web_map_container("caddy")["volumeMounts"]])
+
+    @unittest.skipUnless(shutil.which("sh") and shutil.which("jq"), "needs sh and jq")
+    def test_stats_script_gathers_every_players_file(self):
+        with tempfile.TemporaryDirectory() as folder:
+            server = pathlib.Path(folder)
+            stats = server / "dripcraft" / "players" / "stats"
+            stats.mkdir(parents=True)
+            (server / "whitelist.json").write_text(json.dumps([
+                {"uuid": "aaaa", "name": "OldName"}, {"uuid": "bbbb", "name": ".Bedrock"},
+            ]))
+            (server / "usercache.json").write_text(json.dumps([{"uuid": "aaaa", "name": "NewName", "expiresOn": "x"}]))
+            (stats / "aaaa.json").write_text(json.dumps({"stats": {
+                "minecraft:custom": {"minecraft:play_time": 1200},
+                "minecraft:mined": {"minecraft:stone": 3},
+                "minecraft:picked_up": {"minecraft:stone": 3},
+            }, "DataVersion": 1}))
+            (stats / "bbbb.json").write_text(json.dumps({"stats": {}}))
+            (stats / "cccc.json").write_text(json.dumps({"stats": {"minecraft:killed_by": {"minecraft:zombie": 1}}}))
+            # The log: NewName joined from two addresses, and someone typed a line in
+            # chat that looks like .Bedrock joining from a third.
+            (server / "logs").mkdir()
+            with gzip.open(server / "logs" / "2026-11-01-1.log.gz", "wt") as log:
+                log.write("[10:00:00] [Server thread/INFO]: NewName[/5.5.5.5:1000] logged in with entity id 1 at (0, 0, 0)\n")
+            (server / "logs" / "latest.log").write_text(
+                "[11:00:00] [Server thread/INFO]: NewName[/1.2.3.4:1000] logged in with entity id 2 at (0, 0, 0)\n"
+                "[11:01:00] [Async Chat Thread - #1/INFO]: <NewName> [11:00:00] [Server thread/INFO]: "
+                ".Bedrock[/5.5.5.5:1000] logged in with entity id 3 at (0, 0, 0)\n"
+                "[11:02:00] [Server thread/INFO]: .Bedrock[/9.9.9.9:1000] logged in with entity id 4 at (0, 0, 0)\n"
+            )
+            # The country database, the skin and its model are there already, as after an
+            # earlier round, and FETCH=0 keeps the script off the internet.
+            state = server / "state"
+            state.mkdir()
+            with gzip.open(state / "dbip.csv.gz", "wt") as database:
+                database.write("0.0.0.0,0.255.255.255,ZZ\n1.2.3.0,1.2.3.255,DK\n5.5.5.0,5.5.5.255,SE\n::,1::,US\n")
+            public = server / "public"
+            (public / "skins").mkdir(parents=True)
+            (public / "skins" / "aaaa.png").write_bytes(b"\x89PNG")
+            (state / "skin-aaaa").write_text("slim\n")
+            out = public / "stats.json"
+
+            def run():
+                return subprocess.run(
+                    ["sh", (ROOT / "manifests" / "player-stats.sh").as_posix()],
+                    env={
+                        **os.environ, "ONCE": "1", "FETCH": "0", "SERVER_DIR": server.as_posix(),
+                        "OUT_FILE": out.as_posix(), "STATE_DIR": state.as_posix(),
+                    },
+                    capture_output=True, text=True, timeout=60,
+                )
+
+            self.assertEqual(run().returncode, 0)
+            data = json.loads(out.read_text())
+            players = {p["uuid"]: p for p in data["players"]}
+            # The country is that of the last login. An address the database does not
+            # know gives none, and no address reaches the page.
+            self.assertEqual([players[u]["country"] for u in ("aaaa", "bbbb", "cccc")], ["DK", None, None])
+            self.assertEqual([players[u]["skin"] for u in ("aaaa", "bbbb", "cccc")], ["slim", None, None])
+            for file in public.rglob("*"):
+                if file.is_file():
+                    self.assertNotRegex(file.read_text(errors="replace"), r"\d+\.\d+\.\d+\.\d+", file.name)
+            # The name a player last joined with wins over the whitelist's.
+            self.assertEqual([players[u]["name"] for u in ("aaaa", "bbbb", "cccc")], ["NewName", ".Bedrock", None])
+            self.assertEqual(players["aaaa"]["stats"]["custom"], {"play_time": 1200})
+            self.assertEqual(players["aaaa"]["stats"]["mined"], {"stone": 3})
+            self.assertEqual(players["cccc"]["stats"]["killed_by"], {"zombie": 1})
+            self.assertEqual(
+                set(players["bbbb"]["stats"]), {"custom", "mined", "crafted", "used", "broken", "killed", "killed_by"}
+            )
+            self.assertIsInstance(players["aaaa"]["seen"], int)
+
+            # A file the game is halfway through writing leaves the last good copy alone,
+            # and the script still ends well, because a stopped container takes the map down.
+            (stats / "aaaa.json").write_text('{"stats": {"minecraft:custom"')
+            result = run()
+            self.assertEqual(result.returncode, 0)
+            self.assertIn("keeps its last numbers", result.stdout)
+            self.assertEqual(json.loads(out.read_text()), data)
 
     def test_default_deny_both_ways(self):
         spec = self.objects[("NetworkPolicy", "default-deny")]["spec"]

@@ -110,10 +110,80 @@ spec:
               mountPath: /data
             - name: config
               mountPath: /config
+            # The player statistics page and its numbers (see README).
+            - name: stats-page
+              mountPath: /srv/stats-page
+              readOnly: true
+            - name: stats-data
+              mountPath: /srv/stats-data
+              readOnly: true
+        # Gathers the survival world's statistics files into one file for the
+        # player statistics page, with each player's skin and the country they
+        # last joined from (see README). Only this container sees the server's
+        # folder, read-only. Caddy, which faces the web, sees the result.
+        - name: player-stats
+          # Already on the node, and it has jq.
+          image: itzg/minecraft-server:java25@sha256:e2fabc536673f8c6b343055c93f7a73e10caa79cd3368f645987593c65adf1e0
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          command: [sh, /scripts/player-stats.sh]
+          env:
+            # The world's folder: LEVEL in minecraft.yaml.
+            - name: WORLD
+              value: dripcraft
+          resources:
+            # The node's CPU is almost fully reserved (see creative.yaml).
+            requests:
+              cpu: 5m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
+          volumeMounts:
+            - name: server
+              mountPath: /server
+              subPath: server
+              readOnly: true
+            - name: stats-script
+              mountPath: /scripts
+              readOnly: true
+            - name: stats-data
+              mountPath: /out
+            # Players' addresses and the country database. Caddy does not mount this.
+            - name: stats-state
+              mountPath: /state
       volumes:
         - name: caddyfile
           configMap:
             name: web-map
+        - name: stats-page
+          configMap:
+            name: player-stats
+            items:
+              - key: index.html
+                path: index.html
+        - name: stats-script
+          configMap:
+            name: player-stats
+            items:
+              - key: player-stats.sh
+                path: player-stats.sh
+        - name: stats-data
+          emptyDir:
+            sizeLimit: 16Mi
+        - name: stats-state
+          emptyDir:
+            sizeLimit: 64Mi
+        # The survival server's volume, which a second pod on the same node can
+        # mount. Read-only here, so nothing in this pod can change the world.
+        - name: server
+          persistentVolumeClaim:
+            claimName: data-minecraft-0
+            readOnly: true
         - name: certificates
           persistentVolumeClaim:
             claimName: web-map-certificates

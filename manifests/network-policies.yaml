@@ -250,7 +250,7 @@ spec:
       ports:
         - {protocol: TCP, port: 8080}
     # Let's Encrypt, for the certificate, and the skins, flags and country
-    # database for the player statistics page: HTTPS only.
+    # database for the members' hub: HTTPS only.
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0

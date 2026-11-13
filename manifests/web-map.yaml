@@ -110,7 +110,7 @@ spec:
               mountPath: /data
             - name: config
               mountPath: /config
-            # The player statistics page and its numbers (see README).
+            # The members' hub and its numbers (see README).
             - name: stats-page
               mountPath: /srv/stats-page
               readOnly: true
@@ -118,7 +118,7 @@ spec:
               mountPath: /srv/stats-data
               readOnly: true
         # Gathers the survival world's statistics files into one file for the
-        # player statistics page, with each player's skin and the country they
+        # members' hub, with each player's skin and the country they
         # last joined from (see README). Only this container sees the server's
         # folder, read-only. Caddy, which faces the web, sees the result.
         - name: player-stats
@@ -166,6 +166,14 @@ spec:
             items:
               - key: index.html
                 path: index.html
+              - key: hub.css
+                path: hub.css
+              - key: hub.js
+                path: hub.js
+              - key: fraunces.woff2
+                path: fraunces.woff2
+              - key: figtree.woff2
+                path: figtree.woff2
         - name: stats-script
           configMap:
             name: player-stats

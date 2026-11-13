@@ -1,5 +1,5 @@
 #!/bin/sh
-# Writes the numbers for the player statistics page (see README). It runs beside
+# Writes the numbers for the members' hub (see README). It runs beside
 # Caddy in the web-map pod and reads the survival world's own statistics files,
 # which the game keeps for every player, so the server needs no plugin for this.
 #

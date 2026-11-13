@@ -21,7 +21,7 @@ or the tailnet, and players never see the home IP address.
 player -> playit edge -> playit-agent pod -> minecraft pod (Paper + backup sidecar)
 player -> playit edge -> playit-agent pod -> minecraft-creative pod (Paper + backup sidecar)
 browser -> playit edge -> playit-agent pod -> web-map pod (Caddy) -> minecraft pod (web map)
-browser -> playit edge -> playit-agent pod -> web-map pod (Caddy, player statistics)
+browser -> playit edge -> playit-agent pod -> web-map pod (Caddy, members' hub)
 ```
 
 Network policy limits both servers to HTTPS and DNS, and the agent to DNS, the
@@ -436,7 +436,7 @@ it took down same-wood walls touching a tree.
 
 squaremap draws the world from above as a map in the browser, at `/map/` on the game's
 own address with `https://` in front. The address alone is the
-[player statistics](#player-statistics) page, which links to the map. It shows the terrain and everything built on it, the spawn
+[members' hub](#members-hub), which links to the map. It shows the terrain and everything built on it, the spawn
 point, the world border and where each player is, updated every second. Anyone who knows
 the server's address can see every base and follow players around. A player is left off
 the map while invisible, in spectator mode or wearing a carved pumpkin.
@@ -530,16 +530,63 @@ BlueMap was considered and rejected. Its 3D tiles would take about 25 GB for the
 overworld alone, it renders every world as soon as it starts, and the image cannot patch
 its settings files. Pl3xMap has only beta builds for 26.x, and Dynmap has none.
 
-## Player statistics
+## Members' hub
 
 The game's own address with `https://` in front, the one the web map's tunnel serves,
-opens a page that shows what each player has done in the survival world:
-time played, deaths, mobs killed, blocks mined, distance travelled, items crafted and
-trades with villagers. Selecting a player shows what they mined, crafted, used and killed
-most, what killed them, and how they travelled. Everyone stands together on a meadow at
-the top, each in their own skin, with the flag of the country they last joined from and a
-green dot while they are playing. Like the map, anyone who knows the
-server's address can see it, countries included.
+opens the members' hub: a small site for the people who play here. For now it shows what
+everyone has done in the survival world, and it is laid out so more can be added. Like the
+map, anyone who knows the server's address can see it, countries included.
+
+- **Home** (`/`) has everyone standing together on the meadow, each in their own skin, with
+  their name, the flag of the country they last joined from and a green dot while they
+  are playing. Someone who is playing waves. Below are who was here last, a few of the
+  records, and doors to the other pages.
+- **Members** (`/members`) has a card for each member, and `/members/NAME` is a member's
+  own page. The member stands at the top, waves when the page opens or when touched, and
+  turns when dragged. Below are time played, deaths, mobs killed, blocks mined, distance
+  travelled, items crafted and trades with villagers, each with their place among the
+  others, then what they mined, crafted, used and killed most, what killed them, and how
+  they travelled, and at the foot links to the members either side.
+- **Records** (`/records`) has the noticeboard of titles, such as Homebody for the most
+  time played, and everyone's numbers: on a wide screen a table that sorts by any column,
+  and on a phone a ranking by one number at a time.
+- **Map** goes to the [web map](#web-map) at `/map/`.
+
+Moving between pages keeps the sky where it is while the land changes under it, slides
+the page the way it lies from the last one, and lets a member's figure walk from where it
+stood to where it stands on the next page. Going back returns to where the last page was
+scrolled to. This uses the browser's view transitions, and a browser without them, or set
+to reduce motion, changes page at once. With reduced motion nothing else moves either.
+
+The hub is `manifests/hub.html`, `hub.css` and `hub.js`. The script draws
+every page and changes the address without loading anything again, so there is no file
+called `/members`. Caddy answers every address that is not a file, the map or the numbers
+with `hub.html`, which is how a page can be reloaded or shared by its address. An address
+that names no page shows "Nothing here".
+
+The look is a view over the acres: a sky with a square sun, hills that fade into the
+distance with trees and a cottage on them, and the meadow in front, where the members
+stand, which fades into the page below. In dark mode it is night, with a moon, stars,
+fireflies and light in the cottage's windows. `hub.js` draws the landscape out of blocks,
+so there are no picture files, and the icon in the browser's tab is written out in
+`hub.html`.
+
+Members are drawn in three dimensions from their skins, the way the game builds a player:
+six boxes, with a second layer for hats, jackets and sleeves. `hub.js` does this itself
+with WebGL and uses no library. A browser without WebGL shows them flat, from the front.
+
+The two fonts, Fraunces for headings and names and Figtree for text, are in `manifests/`
+as `fraunces.woff2` and `figtree.woff2` and are served with the hub. Both come from
+[Google Fonts' repository](https://github.com/google/fonts/tree/main/ofl) and are under
+the SIL Open Font License 1.1, which allows serving and cutting them down. To keep them
+small they hold only Latin letters and the weights from 400 to 800, and Fraunces only its
+soft style at one optical size (`SOFT` 100, `WONK` 0, `opsz` 72). They were cut with
+fontTools (`varLib.instancer`, then `subset` to WOFF2), which keeps the copyright and
+licence notices inside the files.
+
+Everything the hub serves is in the `player-stats` ConfigMap, which may hold 1 MiB. It is
+about 175 kB now. The fonts count for a third more than their size, because a ConfigMap
+keeps files that are not text as base64.
 
 The game counts all of this itself, in one file per player under `players/stats` in the
 world folder, so the server needs no plugin and the numbers go back to the world's first
@@ -549,13 +596,13 @@ old. "Last played" is when their file was last saved.
 
 The `player-stats` container beside Caddy in the `web-map` pod runs
 `manifests/player-stats.sh`. Every five minutes it gathers the files into one, with names
-from the whitelist and the server's name cache, and Caddy serves that with the page,
-`manifests/player-stats.html`. Only that container mounts the server's folder, read-only,
-so Caddy never sees it, and changing the page or the script restarts the proxy and not the
+from the whitelist and the server's name cache, and Caddy serves that with the hub.
+Only that container mounts the server's folder, read-only,
+so Caddy never sees it, and changing the hub or the script restarts the proxy and not the
 server.
 
-The page loads nothing from other sites, so a visitor's browser tells nobody else what it
-is looking at. The container fetches what the page needs and Caddy serves the copies:
+The hub loads nothing from other sites, so a visitor's browser tells nobody else what it
+is looking at. The container fetches what it needs and Caddy serves the copies:
 
 - **Skins** come from Mojang, once a day for each player. A Bedrock player has none there
   and gets a plain figure.
@@ -572,11 +619,11 @@ All of this is kept in temporary folders that go with the pod, so a restart of t
 it again, and reads every log again for the addresses. Until a skin or a flag has been
 fetched, the page shows a plain figure or the flag emoji.
 
-Caddy serves the page at the root of the address and passes `/map/` on to squaremap with
+Caddy serves the hub at the root of the address and passes `/map/` on to squaremap with
 the folder's name taken off, which works because squaremap asks for its files by relative
 address.
 
-A player stays on the page after leaving the whitelist, for as long as their file exists.
+A player stays in the hub after leaving the whitelist, for as long as their file exists.
 A Bedrock player who also plays on Java has two files and appears twice.
 
 The container must keep running. If it stops, the pod becomes unready and the web map

@@ -6,6 +6,7 @@ import gzip
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import tempfile
@@ -199,7 +200,7 @@ class DripcraftPublicTests(unittest.TestCase):
         server = {p["name"]: p["containerPort"] for p in self.container("minecraft")["ports"]}
         # The map is under /map/, and the page at the root links to it there.
         self.assertIn(f"handle_path /map/* {{\n\t\treverse_proxy minecraft:{server['map']}\n\t}}", self.caddyfile)
-        self.assertIn('<a href="map/">', (ROOT / "manifests" / "player-stats.html").read_text(encoding="utf-8"))
+        self.assertIn('<a href="/map/">', (ROOT / "manifests" / "hub.html").read_text(encoding="utf-8"))
         service = self.objects[("Service", "minecraft")]["spec"]["ports"]
         self.assertIn({"name": "map", "port": server["map"], "targetPort": "map", "protocol": "TCP"}, service)
 
@@ -278,11 +279,19 @@ class DripcraftPublicTests(unittest.TestCase):
             self.assertIn(f"root * {mounts[volume]['mountPath']}\n", self.caddyfile)
             self.assertIs(mounts[volume]["readOnly"], True)
         page = next(v for v in self.web_map["volumes"] if v["name"] == "stats-page")["configMap"]
-        self.assertEqual(page["items"], [{"key": "index.html", "path": "index.html"}])
+        self.assertEqual(
+            [item["key"] for item in page["items"]],
+            ["index.html", "hub.css", "hub.js", "fraunces.woff2", "figtree.woff2"],
+        )
+        files = self.objects_with_prefix("ConfigMap", "player-stats")
+        for item in page["items"]:
+            self.assertEqual(item["path"], item["key"])
+            # The fonts are not text, so they are kept apart from the rest.
+            self.assertIn(item["key"], files["binaryData" if item["key"].endswith(".woff2") else "data"])
         self.assertIn("index.html", self.objects_with_prefix("ConfigMap", "player-stats")["data"])
-        # The page asks for data/stats.json beside itself.
+        # The hub asks for /data/stats.json.
         self.assertIn("handle_path /data/* {", self.caddyfile)
-        self.assertIn('fetch("data/stats.json"', (ROOT / "manifests" / "player-stats.html").read_text(encoding="utf-8"))
+        self.assertIn('fetch("/data/stats.json"', (ROOT / "manifests" / "hub.js").read_text(encoding="utf-8"))
 
     def test_stats_are_written_where_caddy_reads_them(self):
         script = (ROOT / "manifests" / "player-stats.sh").read_text()
@@ -302,11 +311,42 @@ class DripcraftPublicTests(unittest.TestCase):
         self.assertEqual(container["image"], self.container("minecraft")["image"])
         self.assertLessEqual(int(container["resources"]["requests"]["cpu"].rstrip("m")), 5)
 
-    def test_stats_page_loads_nothing_from_other_sites(self):
-        page = (ROOT / "manifests" / "player-stats.html").read_text(encoding="utf-8")
+    def test_hub_loads_nothing_from_other_sites(self):
         # Skins and flags are copies the script fetched. A link the reader may follow is fine.
-        self.assertNotRegex(page, r"src\s*=\s*[\"'](?:https?:)?//")
-        self.assertNotRegex(page, r"<link|@import|url\(")
+        page = (ROOT / "manifests" / "hub.html").read_text(encoding="utf-8")
+        loaded = re.findall(r"<(?:link|script|img|iframe|source)\b[^>]*>", page)
+        addresses = [re.search(r"(?:src|href)=\"([^\"]*)\"", tag).group(1) for tag in loaded]
+        # The stylesheet, the script and the two fonts are files beside the page.
+        self.assertEqual(
+            sorted(a for a in addresses if not a.startswith("data:")),
+            ["/figtree.woff2", "/fraunces.woff2", "/hub.css", "/hub.js"],
+        )
+        # The icon is a drawing written out in the page itself, which asks for nothing.
+        icons = [a for a in addresses if a.startswith("data:")]
+        self.assertEqual(len(icons), 1)
+        self.assertTrue(icons[0].startswith("data:image/svg+xml,"))
+        self.assertNotRegex(icons[0], r"(?i)href|url\(|image |script")
+        # The only files the stylesheet asks for are the two fonts beside it.
+        style = (ROOT / "manifests" / "hub.css").read_text(encoding="utf-8")
+        self.assertNotIn("@import", style)
+        self.assertEqual(re.findall(r"url\(([^)]*)\)", style), ['"/fraunces.woff2"', '"/figtree.woff2"'])
+        # The one address in the script is the name of the SVG format, which nothing fetches.
+        script = (ROOT / "manifests" / "hub.js").read_text(encoding="utf-8").replace("http://www.w3.org/2000/svg", "")
+        self.assertNotRegex(script, r"https?://|[\"'`]//")
+
+    def test_every_page_of_the_hub_can_be_opened_by_its_address(self):
+        # The hub draws its own pages, so an address like /members is not a file. Caddy
+        # answers those with the hub, and the hub asks for its files from the root, so
+        # they are found from a page however deep its address is.
+        self.assertIn("try_files {path} /index.html", self.caddyfile)
+        page = (ROOT / "manifests" / "hub.html").read_text(encoding="utf-8")
+        script = (ROOT / "manifests" / "hub.js").read_text(encoding="utf-8")
+        for address in re.findall(r"(?:href|src)=\"([^\"]*)\"", page):
+            # The icon is written out in the page, so it is not an address.
+            self.assertRegex(address, r"^(?:/|data:image/svg\+xml,|https://db-ip\.com$)", address)
+        for address in re.findall(r"\"(/data/[^\"]*)\"", script):
+            self.assertTrue(address.startswith("/data/"))
+        self.assertNotRegex(script, r"[\"'`]data/")
 
     def test_caddy_never_sees_players_addresses(self):
         # The script keeps addresses and the country database in its state folder.

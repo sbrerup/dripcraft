@@ -1,0 +1,492 @@
+/* The members' hub (see README). Every page opens with a view over the acres: a
+   sky, hills fading into the distance and the meadow in front, which fades into
+   the page below. Morning in light mode, night in dark mode. */
+@font-face {
+  font-family: "Fraunces"; font-weight: 400 800; font-display: swap;
+  src: url("/fraunces.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Figtree"; font-weight: 400 800; font-display: swap;
+  src: url("/figtree.woff2") format("woff2");
+}
+:root {
+  color-scheme: light dark;
+  --display: "Fraunces", Georgia, "Times New Roman", serif;
+  --text: "Figtree", "Segoe UI", system-ui, sans-serif;
+  --way: 1;
+  /* The page. */
+  --bg: #eef3e2;
+  --card: #fffefa;
+  --inset: #f3f6e9;
+  --ink: #1b2a1e;
+  --soft: #536554;
+  --faint: #7c8c7b;
+  --line: rgba(27, 42, 30, 0.1);
+  --accent: #2a7a3c;
+  --accent-soft: rgba(42, 122, 60, 0.12);
+  --on-accent: #ffffff;
+  --gold: #8a5d08;
+  --gold-soft: #fbecb6;
+  --live: #1fae48;
+  --glass: rgba(255, 254, 248, 0.86);
+  --shadow: 0 1px 2px rgba(30, 50, 30, 0.06), 0 10px 28px -12px rgba(30, 50, 30, 0.22);
+  --shadow-up: 0 2px 4px rgba(30, 50, 30, 0.08), 0 18px 36px -14px rgba(30, 50, 30, 0.3);
+  /* The sky. */
+  --sky-1: #62b5e6;
+  --sky-2: #a9dcf1;
+  --sky-3: #fbf0cd;
+  --sky-ink: #12301d;
+  --sky-accent: #1d6a33;
+  --sun: #fff6c2;
+  --sun-ring: rgba(255, 244, 180, 0.5);
+  --sun-glow: rgba(255, 238, 170, 0.6);
+  --cloud: #ffffff;
+  --cloud-shade: #e2f0f6;
+  /* The land, from far to near. Each line of hills is lighter at its foot, where
+     the haze gathers, and along its top, where the light falls. */
+  --far-1: #93cbd0;
+  --far-1-low: #c2e4d6;
+  --far-1-cap: #b4dfde;
+  --far-2: #7cc4a4;
+  --far-2-low: #a6d9b3;
+  --far-2-cap: #9ed8b9;
+  --far-2-tree: #63b08c;
+  --far-3: #68b877;
+  --far-3-low: #86c986;
+  --far-3-cap: #8fd296;
+  --acre-1: #5db45d;
+  --acre-2: #4fa84f;
+  --acre-3: #439c45;
+  --leaf: #3d9447;
+  --leaf-lit: #62b860;
+  --leaf-dim: #2f7c3c;
+  --pine: #2f7c4a;
+  --trunk: #7b5a3a;
+  --wall: #f7e9cb;
+  --roof: #c25a40;
+  --door: #7b4f2c;
+  --chimney: #b7a48c;
+  --window: #9bd3ec;
+  --smoke: #ffffff;
+  --flora-strength: 1;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0c1611;
+    --card: #142019;
+    --inset: #1a2920;
+    --ink: #edf2e4;
+    --soft: #a9b8a6;
+    --faint: #7f907d;
+    --line: rgba(237, 242, 228, 0.09);
+    --accent: #8bd58e;
+    --accent-soft: rgba(139, 213, 142, 0.14);
+    --on-accent: #0c1611;
+    --gold: #f1c75b;
+    --gold-soft: rgba(241, 199, 91, 0.15);
+    --live: #4fdd72;
+    --glass: rgba(18, 30, 23, 0.88);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 30px -12px rgba(0, 0, 0, 0.7);
+    --shadow-up: 0 2px 4px rgba(0, 0, 0, 0.3), 0 20px 40px -14px rgba(0, 0, 0, 0.8);
+    --sky-1: #060b20;
+    --sky-2: #10204a;
+    --sky-3: #2a4b6e;
+    --sky-ink: #f4f1dd;
+    --sky-accent: #a9e0a4;
+    --sun: #f4f1d6;
+    --sun-ring: rgba(244, 241, 214, 0.1);
+    --sun-glow: rgba(170, 200, 255, 0.22);
+    --cloud: rgba(190, 205, 255, 0.1);
+    --cloud-shade: rgba(190, 205, 255, 0.05);
+    --far-1: #1c3857;
+    --far-1-low: #284a68;
+    --far-1-cap: #2b4d70;
+    --far-2: #17384a;
+    --far-2-low: #1f4657;
+    --far-2-cap: #24505f;
+    --far-2-tree: #133142;
+    --far-3: #143a3b;
+    --far-3-low: #194642;
+    --far-3-cap: #21564f;
+    --acre-1: #133d2d;
+    --acre-2: #103527;
+    --acre-3: #0e2e22;
+    --leaf: #124030;
+    --leaf-lit: #1b5640;
+    --leaf-dim: #0c2d22;
+    --pine: #0e3329;
+    --trunk: #1a1915;
+    --wall: #202c3b;
+    --roof: #141b27;
+    --door: #0e141c;
+    --chimney: #1a2330;
+    --window: #ffd067;
+    --smoke: #8fa3c0;
+    --flora-strength: 0.35;
+  }
+}
+* { box-sizing: border-box; }
+html { background: var(--bg); -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font: 500 16px/1.5 var(--text); -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent); -webkit-tap-highlight-color: transparent; }
+a:focus-visible, button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; border-radius: 8px; }
+h1, h2, h3, p, ul, ol { margin: 0; padding: 0; }
+ul, ol { list-style: none; }
+h1, h2, h3 { font-family: var(--display); font-weight: 650; letter-spacing: -0.015em; }
+canvas { display: block; flex: none; }
+canvas.head { width: 36px; height: 36px; }
+img.flag { width: 18px; height: auto; border-radius: 3px; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.14); vertical-align: -2px; flex: none; }
+.flag { line-height: 1; flex: none; }
+.live { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--live); box-shadow: 0 0 0 0 var(--live); flex: none; animation: pulse 2.2s ease-out infinite; }
+@keyframes pulse { from { box-shadow: 0 0 0 0 color-mix(in srgb, var(--live) 70%, transparent); } to { box-shadow: 0 0 0 9px transparent; } }
+.arrow { display: inline-block; width: 0.5em; height: 0.5em; border: solid currentColor; border-width: 2px 2px 0 0; transform: rotate(45deg); flex: none; transition: translate 0.2s; }
+.back .arrow, .before .arrow, .button .arrow { transform: rotate(-135deg); }
+.chip { display: inline-block; padding: 1px 8px; border-radius: 999px; background: var(--inset); color: var(--soft); font-size: 0.6875rem; font-weight: 700; }
+.title { display: inline-block; padding: 2px 10px; border-radius: 999px; background: var(--gold-soft); color: var(--gold); font-size: 0.75rem; font-weight: 800; letter-spacing: 0.02em; white-space: nowrap; }
+.shade { display: block; width: 44px; height: 12px; margin-top: -11px; border-radius: 50%; background: radial-gradient(closest-side, rgba(8, 30, 12, 0.42), transparent); }
+
+/* The name and the pages float over the view: along the top on a wide screen,
+   and on a phone the pages are within reach of a thumb along the bottom. */
+.top {
+  position: fixed; z-index: 20; inset: 0 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 14px max(20px, calc((100vw - 1120px) / 2)); pointer-events: none;
+}
+.brand, #nav {
+  pointer-events: auto; background: var(--glass); border: 1px solid var(--line); border-radius: 999px; box-shadow: var(--shadow);
+  -webkit-backdrop-filter: blur(14px) saturate(1.5); backdrop-filter: blur(14px) saturate(1.5);
+}
+.brand {
+  display: flex; align-items: center; gap: 7px; padding: 7px 16px 7px 11px; color: var(--ink);
+  font: 700 1.0625rem/1.4 var(--display); letter-spacing: -0.01em; text-decoration: none; white-space: nowrap; view-transition-name: brand;
+}
+.brand svg { width: 22px; height: 22px; color: var(--accent); }
+#nav { display: flex; gap: 2px; padding: 5px; view-transition-name: nav; }
+#nav a {
+  position: relative; display: flex; align-items: center; gap: 7px; padding: 7px 14px; border-radius: 999px;
+  color: var(--soft); font-size: 0.9375rem; font-weight: 700; text-decoration: none; white-space: nowrap; transition: color 0.15s;
+}
+#nav svg, .door svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+#nav a:hover, #nav a[aria-current] { color: var(--ink); }
+#nav a[aria-current] svg { color: var(--accent); }
+#nav span { position: relative; }
+.spot { position: absolute; inset: 0; border-radius: inherit; background: var(--accent-soft); opacity: 0; }
+#nav a[aria-current] .spot { opacity: 1; view-transition-name: spot; }
+@media (max-width: 719px) {
+  .top { position: absolute; padding: 12px 14px; }
+  #nav {
+    position: fixed; left: 12px; right: 12px; bottom: calc(10px + env(safe-area-inset-bottom)); justify-content: space-around;
+    padding: 6px; border-radius: 24px; box-shadow: var(--shadow-up);
+  }
+  #nav a { flex: 1; flex-direction: column; gap: 1px; padding: 7px 4px 5px; border-radius: 18px; font-size: 0.6875rem; }
+  #nav svg { width: 23px; height: 23px; }
+  body { padding-bottom: calc(86px + env(safe-area-inset-bottom)); }
+}
+
+/* The view. The sky is a square sun or moon with its glow, flat clouds that
+   drift, and at night stars and fireflies. */
+.scene { position: relative; overflow: hidden; isolation: isolate; color: var(--sky-ink); }
+.sky { --horizon: 300px; position: absolute; inset: 0; z-index: -1; background: linear-gradient(var(--sky-1), var(--sky-2) calc(var(--horizon) * 0.45), var(--sky-3) var(--horizon)); }
+.home .sky { --horizon: 440px; }
+.sky i { position: absolute; }
+.sun { top: 92px; right: max(9%, calc(50% - 470px)); width: 52px; height: 52px; border-radius: 3px; background: var(--sun); box-shadow: 0 0 0 9px var(--sun-ring), 0 0 0 20px var(--sun-ring); }
+.glow { top: -92px; right: calc(max(9%, calc(50% - 470px)) - 184px); width: 420px; height: 420px; border-radius: 50%; background: radial-gradient(closest-side, var(--sun-glow), transparent); }
+.cloud { height: 16px; border-radius: 2px; background: var(--cloud); box-shadow: inset 0 -5px 0 var(--cloud-shade); animation: drift 80s ease-in-out infinite alternate; }
+.cloud::before, .cloud::after { content: ""; position: absolute; bottom: 100%; left: 16%; width: 54%; height: 12px; border-radius: 2px 2px 0 0; background: var(--cloud); }
+.cloud::after { bottom: calc(100% + 12px); left: 30%; width: 26%; height: 10px; }
+.c1 { top: 84px; left: 6%; width: 132px; }
+.c2 { top: 176px; left: 27%; width: 78px; opacity: 0.75; animation-duration: 120s; }
+.c3 { top: 148px; right: 4%; width: 104px; opacity: 0.85; animation-duration: 100s; animation-direction: alternate-reverse; }
+.c4 { top: 128px; left: 61%; width: 62px; opacity: 0.6; animation-duration: 140s; }
+.sub .c2, .sub .c3 { top: 126px; }
+@keyframes drift { to { transform: translateX(90px); } }
+.stars { display: none; top: 0; left: 0; width: 2px; height: 2px; }
+.s1 { box-shadow: var(--stars-1); }
+.s2 { box-shadow: var(--stars-2); animation-delay: -1.7s; }
+.s3 { box-shadow: var(--stars-3); animation-delay: -3.1s; }
+.fly { display: none; position: absolute; z-index: 3; width: 3px; height: 3px; border-radius: 50%; background: #fbf3a6; box-shadow: 0 0 7px 2px rgba(250, 240, 140, 0.75); pointer-events: none; animation: fly 12s ease-in-out infinite; }
+@keyframes twinkle { 50% { opacity: 0.25; } }
+@keyframes fly {
+  0%, 100% { transform: translate(0, 0); opacity: 0; }
+  20% { opacity: 1; }
+  50% { transform: translate(34px, -26px); opacity: 0.9; }
+  70% { opacity: 0.15; }
+  85% { transform: translate(-14px, -44px); opacity: 1; }
+}
+@media (prefers-color-scheme: dark) {
+  .stars { display: block; animation: twinkle 5s ease-in-out infinite; }
+  .fly { display: block; }
+  /* The moon has a few craters. */
+  .sun {
+    background: linear-gradient(#d9d5b8, #d9d5b8) 9px 10px / 12px 10px no-repeat,
+      linear-gradient(#d9d5b8, #d9d5b8) 30px 28px / 14px 14px no-repeat,
+      linear-gradient(#d9d5b8, #d9d5b8) 12px 36px / 8px 6px no-repeat, var(--sun);
+  }
+  .window { filter: drop-shadow(0 0 5px rgba(255, 200, 90, 0.9)); }
+}
+
+/* What the page says about itself, written on the sky. */
+.words { position: relative; z-index: 2; padding: 104px 20px 0; text-align: center; view-transition-name: words; }
+.over { font: 500 1.125rem/1.2 var(--display); color: var(--sky-accent); }
+h1 { font-size: clamp(2.5rem, 9.5vw, 4rem); font-weight: 700; line-height: 1; letter-spacing: -0.03em; overflow-wrap: anywhere; }
+/* A name is set smaller the longer it is, so it stays on one line: --len is how
+   many letters it has, and --room how wide it may be. */
+.name { font-size: min(var(--size), calc((var(--room)) / var(--len, 8) / 0.62)); }
+h1.name { --size: clamp(2.5rem, 9.5vw, 4rem); --room: min(100vw - 44px, 900px); }
+.home h1 { margin-top: 4px; font-size: clamp(3.5rem, 15.5vw, 6.25rem); line-height: 0.95; }
+.tally { max-width: 31rem; margin: 14px auto 0; font-size: 1.0625rem; line-height: 1.45; text-wrap: balance; }
+.now, .facts span, .back, .button {
+  display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: 999px; background: var(--glass); color: var(--ink);
+  font-size: 0.875rem; font-weight: 700; box-shadow: var(--shadow);
+}
+.now { margin-top: 16px; }
+.now:not(.on)::before { content: ""; width: 8px; height: 8px; border-radius: 50%; border: 2px solid var(--faint); }
+.back { margin-bottom: 14px; padding: 5px 13px 5px 12px; text-decoration: none; }
+.facts { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 14px; }
+.button { margin-top: 20px; padding: 10px 20px; background: var(--accent); color: var(--on-accent); font-size: 1rem; text-decoration: none; }
+.status.on { color: var(--accent); }
+@media (max-width: 719px) {
+  .words { padding-top: 76px; }
+  /* On a phone the sun keeps to the corner, clear of the words. */
+  .sun { top: 26px; right: 8%; width: 40px; height: 40px; box-shadow: 0 0 0 7px var(--sun-ring), 0 0 0 15px var(--sun-ring); }
+  .glow { top: -124px; right: calc(8% - 150px); width: 340px; height: 340px; }
+  .sky { --horizon: 250px; }
+  .home .sky { --horizon: 340px; }
+}
+
+/* The land: the far hills, then the meadow, each stretch with its own rolling
+   edge drawn above it. hub.js draws the hills, so they are wider than any
+   screen and are cut off at its edges. */
+.far, .crest { display: block; max-width: none; shape-rendering: crispEdges; pointer-events: none; }
+.far { position: relative; margin-top: 6px; }
+.acre {
+  --tall: 148px; --acre: var(--acre-1); --acre-cap: color-mix(in srgb, var(--acre), var(--sky-3) 24%);
+  position: relative; display: flex; flex-direction: column; align-items: center; padding: 0 12px calc(var(--tall) - 26px);
+  background: linear-gradient(var(--acre), color-mix(in srgb, var(--acre), var(--sky-3) 20%));
+}
+.a2 { --acre: var(--acre-2); }
+.a3 { --acre: var(--acre-3); }
+.crest { position: absolute; left: 0; bottom: calc(100% - 1px); }
+.flora { position: absolute; inset: 0; background: var(--flora); opacity: var(--flora-strength); pointer-events: none; }
+/* The nearest stretch fades into the page, like mist over the grass. */
+.acre.last { padding-bottom: 72px; background: linear-gradient(var(--acre) 10%, var(--bg)); }
+.acre.last .flora { -webkit-mask-image: linear-gradient(#000 15%, transparent 80%); mask-image: linear-gradient(#000 15%, transparent 80%); }
+.sub .acre.last { min-height: 84px; }
+.puff { transform-box: fill-box; opacity: 0; animation: puff 6s linear infinite; }
+@keyframes puff {
+  from { opacity: 0; transform: translate(0, 6px) scale(0.6); }
+  15% { opacity: 0.75; }
+  to { opacity: 0; transform: translate(16px, -36px) scale(1.6); }
+}
+
+/* Everyone on the meadow: a row to each stretch, standing a little way down its
+   slope, each with their name and flag at their feet. */
+.row { position: relative; display: flex; justify-content: center; gap: 14px; margin-top: calc(34px - var(--tall)); }
+.standee { display: flex; flex-direction: column; align-items: center; color: #fff; text-decoration: none; animation: hop 0.55s cubic-bezier(0.3, 1.4, 0.5, 1) both; animation-delay: calc(var(--i, 0) * 45ms + 80ms); }
+.standee canvas { height: var(--tall); width: auto; margin: 0 -30px; transition: transform 0.3s cubic-bezier(0.3, 1.7, 0.5, 1); }
+.standee:hover canvas, .standee:focus-visible canvas { transform: translateY(-7px); }
+.standee:active canvas { transform: translateY(1px); }
+.tag {
+  position: relative; display: flex; align-items: center; gap: 5px; max-width: 100%; margin-top: 6px; padding: 2px 8px; border-radius: 7px;
+  background: rgba(12, 34, 19, 0.84); font-size: 0.75rem; font-weight: 700; line-height: 1.5; transition: background 0.2s;
+}
+.tag b { font-weight: inherit; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The flag is pinned to the corner of the name. */
+.tag img.flag, .tag span.flag { position: absolute; top: -9px; right: -9px; width: 17px; border-radius: 2px; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45); font-size: 0.8125rem; }
+.standee:hover .tag { background: rgb(8, 24, 13); }
+@keyframes hop { from { opacity: 0; transform: translateY(26px); } }
+.still .standee { animation: none; }
+@media (max-width: 559px) {
+  .acre { --tall: 124px; padding-left: 6px; padding-right: 6px; }
+  .row { gap: 6px; }
+  .tag { font-size: 0.6875rem; padding: 2px 6px; }
+}
+
+/* One member, standing alone on their page. They can be turned. */
+.solo .acre { --tall: 288px; }
+.solo .words { padding-bottom: 48px; }
+.stage { display: flex; flex-direction: column; align-items: center; margin-top: calc(130px - var(--tall)); }
+.star { height: var(--tall); width: auto; cursor: grab; touch-action: pan-y; view-transition-name: figure; }
+.star:active { cursor: grabbing; }
+.stage .shade { width: 96px; height: 22px; margin-top: -19px; }
+.titles { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 12px; }
+.titles .title { padding: 4px 13px; font-size: 0.8125rem; box-shadow: var(--shadow); background: #fbecb6; color: #6f4a04; }
+@media (max-width: 559px) {
+  .solo .acre { --tall: 236px; }
+  .solo .words { padding-bottom: 26px; }
+  .stage { margin-top: calc(100px - var(--tall)); }
+}
+
+/* The page under the view, and the panels on it. */
+.page { position: relative; max-width: 1120px; margin: -34px auto 0; padding: 0 16px 28px; view-transition-name: page; }
+.page > h2 { margin: 34px 4px 14px; font-size: 1.625rem; }
+.page > h2 small { display: block; margin-top: 2px; font: 500 0.9375rem var(--text); letter-spacing: 0; color: var(--soft); }
+.page > h2:first-child { margin-top: 6px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 20px; box-shadow: var(--shadow); }
+a.card { display: block; color: inherit; text-decoration: none; transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.2s; }
+a.card:hover { transform: translateY(-3px); box-shadow: var(--shadow-up); }
+a.card:active { transform: scale(0.985); }
+a.card:hover .arrow { translate: 3px 0; }
+a.card.before:hover .arrow { translate: -3px 0; }
+/* Panels arrive one after another. */
+.rise > * { animation: rise 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) both; animation-delay: calc(var(--i, 0) * 40ms + 60ms); }
+@keyframes rise { from { opacity: 0; transform: translateY(16px); } }
+.still .rise > * { animation: none; }
+
+/* Home: what is going on, and the doors to the other pages. */
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 16px; }
+.two .card { padding: 20px 20px 16px; }
+.two h2 { margin-bottom: 8px; font-size: 1.375rem; }
+.people a { display: flex; align-items: center; gap: 12px; margin: 0 -10px; padding: 6px 10px; border-radius: 12px; color: inherit; text-decoration: none; transition: background 0.15s; }
+.people a:hover { background: var(--inset); }
+.people span { min-width: 0; line-height: 1.3; }
+.people b { display: flex; align-items: center; gap: 8px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.people small { display: block; font-size: 0.8125rem; font-weight: 700; color: var(--gold); }
+.people em { margin-left: auto; padding-left: 8px; font-size: 0.875rem; font-style: normal; white-space: nowrap; color: var(--soft); font-variant-numeric: tabular-nums; }
+.more { display: inline-flex; align-items: center; gap: 8px; margin-top: 10px; padding: 6px 0; font-weight: 700; text-decoration: none; }
+.more:hover .arrow { translate: 3px 0; }
+.doors { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px; margin-top: 16px; }
+.door { display: flex !important; align-items: center; gap: 14px; padding: 16px 20px 16px 16px; }
+.door svg { width: 46px; height: 46px; padding: 11px; border-radius: 14px; background: var(--accent-soft); color: var(--accent); }
+.door span { flex: 1; min-width: 0; }
+.door strong { display: block; font: 650 1.1875rem/1.3 var(--display); letter-spacing: -0.01em; }
+.door small { display: block; font-size: 0.875rem; color: var(--soft); }
+.door .arrow { color: var(--faint); }
+
+/* Members and records: a panel each, with the member standing in a small view of
+   their own. */
+.members, .records { display: grid; grid-template-columns: repeat(auto-fill, minmax(152px, 1fr)); gap: 14px; }
+.member, .record { container-type: inline-size; display: flex !important; flex-direction: column; align-items: center; gap: 2px; padding: 0 10px 16px; overflow: hidden; text-align: center; }
+.plot {
+  --acre-cap: color-mix(in srgb, var(--acre-1), var(--sky-3) 24%);
+  position: relative; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; align-self: stretch; height: 168px; margin: 0 -10px 12px; padding-bottom: 11px;
+  overflow: hidden; background: linear-gradient(var(--sky-2), var(--sky-3) 75%);
+}
+.patch { position: absolute; left: 0; bottom: 0; display: block; max-width: none; shape-rendering: crispEdges; }
+.plot canvas, .plot .shade { position: relative; }
+.plot canvas { height: 132px; width: auto; transition: transform 0.3s cubic-bezier(0.3, 1.7, 0.5, 1); }
+a.card:hover .plot canvas { transform: translateY(-5px); }
+.member strong, .record strong { --size: 1.1875rem; --room: 100cqi - 26px; display: flex; align-items: center; justify-content: center; gap: 7px; max-width: 100%; font-family: var(--display); font-weight: 650; line-height: 1.5rem; letter-spacing: -0.01em; white-space: nowrap; }
+.record strong { --room: 100cqi; }
+.member .status { display: flex; align-items: center; gap: 7px; font-size: 0.875rem; font-weight: 700; color: var(--soft); }
+.member small, .record em { font-size: 0.8125rem; font-style: normal; color: var(--faint); font-variant-numeric: tabular-nums; }
+.record .title { margin-bottom: 4px; }
+.record em { color: var(--soft); font-size: 0.875rem; }
+@media (min-width: 720px) {
+  .members { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 18px; }
+  .records { grid-template-columns: repeat(auto-fit, minmax(168px, 1fr)); gap: 16px; }
+}
+
+/* One member's page: the big numbers, then what they did most. */
+.tiles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+.tile { padding: 14px 16px 13px; }
+.tile:first-child { grid-column: span 2; }
+.tile small { display: block; font-size: 0.8125rem; font-weight: 700; color: var(--soft); }
+.tile strong { display: block; font: 650 1.625rem/1.25 var(--display); letter-spacing: -0.02em; }
+.tile:first-child strong { font-size: 2.25rem; }
+.tile em { font-size: 0.8125rem; font-style: normal; font-weight: 700; color: var(--faint); }
+.tile em.first { color: var(--gold); }
+.lists { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin-top: 14px; }
+.lists .card { padding: 16px 16px 14px; }
+.lists h3 { margin: 0 4px 10px; font-size: 1.1875rem; }
+.lists li { position: relative; display: flex; justify-content: space-between; gap: 12px; padding: 4px 9px; margin-bottom: 3px; font-size: 0.9375rem; font-variant-numeric: tabular-nums; }
+.lists li::before { content: ""; position: absolute; inset: 0 auto 0 0; width: var(--share, 0); min-width: 6px; border-radius: 7px; background: var(--accent-soft); }
+.lists .bare li::before { content: none; }
+.lists .bare li { border-top: 1px solid var(--line); margin: 0; padding: 6px 4px; }
+.lists .bare li:first-child { border-top: 0; }
+.lists li span, .lists li b { position: relative; }
+.lists li b { font-weight: 700; white-space: nowrap; }
+.lists p { margin: 0 4px; color: var(--faint); font-size: 0.9375rem; }
+.beside { display: flex; gap: 12px; margin-top: 22px; }
+.beside a { flex: 1 1 0; display: flex !important; align-items: center; gap: 9px; min-width: 0; padding: 10px 14px; font-size: 0.9375rem; font-weight: 700; }
+.beside canvas.head { width: 30px; height: 30px; }
+.beside a { max-width: calc(50% - 6px); }
+.beside .after { flex-direction: row-reverse; margin-left: auto; text-align: right; }
+.beside b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.beside .arrow { color: var(--faint); }
+@media (min-width: 720px) {
+  .tiles { grid-template-columns: repeat(4, 1fr); gap: 14px; }
+}
+
+/* Records: everyone's numbers. A narrow screen ranks by one number at a time,
+   and a wide one has the whole table. */
+.wide { display: none; overflow-x: auto; }
+.choices { display: flex; gap: 8px; margin: 0 -16px 12px; padding: 2px 16px; overflow-x: auto; scrollbar-width: none; }
+.choices::-webkit-scrollbar { display: none; }
+.choices button {
+  all: unset; box-sizing: border-box; padding: 7px 15px; border: 1px solid var(--line); border-radius: 999px; background: var(--card); color: var(--soft);
+  font-size: 0.875rem; font-weight: 700; white-space: nowrap; cursor: pointer; transition: background 0.15s, color 0.15s;
+}
+.choices button[aria-pressed="true"] { background: var(--accent); border-color: transparent; color: var(--on-accent); }
+.choices button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.ranks { padding: 6px; }
+.ranks a { position: relative; display: flex; align-items: center; gap: 11px; padding: 8px 10px 11px; border-radius: 14px; color: inherit; text-decoration: none; }
+.ranks a::before, .ranks a::after { content: ""; position: absolute; left: 86px; right: 10px; bottom: 5px; height: 4px; border-radius: 2px; background: var(--inset); }
+.ranks a::after { right: auto; width: calc((100% - 96px) * var(--share, 0%) / 100%); background: var(--accent); }
+.ranks a:not([style])::before, .ranks a:not([style])::after { content: none; }
+.rank { width: 1.25rem; font-style: normal; font-weight: 700; text-align: center; color: var(--faint); font-variant-numeric: tabular-nums; }
+.ranks li:first-child .rank { color: var(--gold); }
+.ranks b { min-width: 0; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ranks em { margin-left: auto; font-style: normal; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+th, td { padding: 9px 14px; text-align: right; white-space: nowrap; }
+th:nth-child(2), td:nth-child(2) { text-align: left; }
+thead th { padding: 0; border-bottom: 1px solid var(--line); }
+thead button {
+  all: unset; box-sizing: border-box; display: block; width: 100%; padding: 15px 14px 11px; cursor: pointer;
+  font-size: 0.8125rem; font-weight: 700; color: var(--faint); text-align: inherit;
+}
+thead button:hover, thead th[aria-sort] button { color: var(--ink); }
+thead th[aria-sort] button::after { content: ""; display: inline-block; margin-left: 6px; border: 4px solid transparent; border-top: 5px solid var(--accent); border-bottom: 0; vertical-align: 2px; }
+thead th[aria-sort="ascending"] button::after { border-top: 0; border-bottom: 5px solid var(--accent); }
+tbody tr { border-top: 1px solid var(--line); transition: background 0.15s; }
+tbody tr:first-child { border-top: 0; }
+tbody tr:hover { background: var(--inset); }
+td.rank { width: 1%; padding-right: 0; }
+td.chosen { font-weight: 700; }
+td.name a { display: flex; align-items: center; gap: 10px; font-weight: 700; color: inherit; text-decoration: none; }
+@media (min-width: 900px) {
+  .narrow { display: none; }
+  .wide { display: block; }
+}
+
+footer { max-width: 660px; margin: 0 auto; padding: 20px 20px 44px; color: var(--faint); font-size: 0.8125rem; text-align: center; text-wrap: balance; }
+footer p { margin-top: 6px; }
+footer p:first-child { font: 500 1.125rem var(--display); color: var(--soft); }
+footer a { color: inherit; }
+
+/* Moving between pages. The sky stays where it is while the land changes under
+   it, the words change, and the page slides the way it lies from the last one.
+   The name and the pages stay put, the mark under the chosen page glides to its
+   new place, and a member's figure walks from where it stood to where it stands
+   on the next page. */
+html[data-way="back"] { --way: -1; }
+@keyframes leave { to { opacity: 0; transform: translateX(calc(var(--way) * -44px)); } }
+@keyframes arrive { from { opacity: 0; transform: translateX(calc(var(--way) * 44px)); } }
+@keyframes fade-out { to { opacity: 0; } }
+@keyframes settle { from { opacity: 0; transform: translateY(10px); } }
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: 0.4s; }
+::view-transition-group(page) { animation-duration: 0.5s; animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1); }
+::view-transition-old(page) { animation: leave 0.2s ease-in both; }
+::view-transition-new(page) { animation: arrive 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) 0.06s both; }
+::view-transition-group(words) { animation-duration: 0.4s; }
+::view-transition-old(words) { animation: fade-out 0.15s ease-in both; }
+::view-transition-new(words) { animation: settle 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) 0.1s both; }
+::view-transition-group(brand), ::view-transition-group(nav) { z-index: 20; animation: none; }
+::view-transition-old(brand), ::view-transition-old(nav) { display: none; }
+::view-transition-new(brand), ::view-transition-new(nav) { animation: none; }
+::view-transition-group(spot) { z-index: 21; animation-duration: 0.45s; animation-timing-function: cubic-bezier(0.3, 1.2, 0.4, 1); }
+::view-transition-old(spot), ::view-transition-new(spot) { height: 100%; }
+::view-transition-group(figure) { z-index: 5; animation-duration: 0.55s; animation-timing-function: cubic-bezier(0.3, 1.1, 0.4, 1); }
+::view-transition-old(figure), ::view-transition-new(figure) { width: 100%; height: 100%; object-fit: contain; }
+/* The far things move less than the near ones as the page is scrolled. */
+@supports (animation-timeline: scroll()) {
+  .far { animation: sink linear both; animation-timeline: scroll(); animation-range: 0 700px; --sink: 46px; }
+  .sun, .glow { animation: sink linear both; animation-timeline: scroll(); animation-range: 0 700px; --sink: 150px; }
+  @keyframes sink { to { transform: translateY(var(--sink)); } }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after, ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; transition: none !important; }
+}

@@ -26,8 +26,8 @@ spec:
       port: 19132
       targetPort: bedrock
       protocol: UDP
-    # squaremap's web server. Only the web-map proxy reaches it, and the proxy
-    # has the HTTPS tunnel (see README and web-map.yaml).
+    # squaremap's web server. Only the web-map proxy and the archive reach it,
+    # and the proxy has the HTTPS tunnel (see README and web-map.yaml).
     - name: map
       port: 8080
       targetPort: map

@@ -2,8 +2,9 @@
 # only grows (see README). Its own pod, so that changing the hub never interrupts
 # it, and a fault in it never takes the hub or the map off the tunnel.
 #
-# Everything it gathers stays here. It can reach the server's map port and
-# nothing else: not the internet, not the LAN, not the rest of the cluster.
+# It can reach the server's map port and nothing else: not the internet, not the
+# LAN, not the rest of the cluster. One thing can connect to it: the ledger, an
+# application in a namespace of its own, which reads Prism's rows from the feed.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -64,6 +65,11 @@ spec:
             # The world's folder: LEVEL in minecraft.yaml.
             - name: WORLD
               value: dripcraft
+          ports:
+            # The feed (see README). FEED_PORT in archive.py is the same number.
+            - name: feed
+              containerPort: 8080
+              protocol: TCP
           resources:
             # The node's CPU is almost fully reserved (see creative.yaml).
             requests:
@@ -104,3 +110,20 @@ spec:
         - name: archive
           persistentVolumeClaim:
             claimName: archive
+---
+# The feed's address inside the cluster. Network policy lets only the ledger's
+# pods connect to it (see network-policies.yaml).
+apiVersion: v1
+kind: Service
+metadata:
+  name: archive
+  labels:
+    app.kubernetes.io/name: archive
+spec:
+  selector:
+    app.kubernetes.io/name: archive
+  ports:
+    - name: feed
+      port: 8080
+      targetPort: feed
+      protocol: TCP

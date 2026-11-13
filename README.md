@@ -28,7 +28,8 @@ Network policy limits both servers to HTTPS and DNS, and the agent to DNS, the
 public internet, the servers' game and voice ports and the web map's proxy. None of
 them can reach the LAN, the tailnet or the rest of the cluster, and the two servers
 cannot reach each other. The [archive](#the-archive) reaches the survival server's map
-port and nothing else, not even the internet.
+port and nothing else, not even the internet. One thing can connect to it: the ledger, an
+application in a namespace of its own, which reads [the feed](#the-feed).
 
 Most of this page is about the survival server. The second one is described under
 [Creative server](#creative-server).
@@ -286,8 +287,11 @@ their contents, TNT damage and lava all roll back exactly.
 
 The server notes far more about what players do than it keeps. The `archive` pod gathers
 it into one SQLite database that only grows, `archive.db` on a volume of its own, so that
-what happened can still be asked about later. Nothing is built on it yet and nothing in it
-is shown anywhere. It is the ground for what the hub does next.
+what happened can still be asked about later. Nothing in it is shown anywhere.
+
+It is the ground for the ledger, an application of its own (`dripcraft-ledger`, in its own
+repository and namespace) that keeps a record of what members did, for the hub and Discord
+to be built on. The ledger gets Prism's rows from the archive through [the feed](#the-feed).
 
 It keeps three things, as the sources gave them, with nothing worked out. A mistake in
 reading them can then be put right later without anything having been lost.
@@ -335,15 +339,67 @@ takes the hub or the map off the tunnel.
 - It mounts the survival server's folder read-only and opens Prism's database for reading
   only, so it cannot change the world or the grief log.
 - Network policy lets it reach the server's map port, to ask who is on the map, and
-  nothing else. It has no way to the internet and nothing can connect to it, so what it
-  holds stays where it is.
+  nothing else. It has no way to the internet.
+- Network policy lets one thing connect to it: the ledger's pods, which read
+  [the feed](#the-feed). Nothing else in the cluster can, and nothing from outside.
 
 The archive says where every member was and what they did, in far more detail than the hub
 shows. Treat it as private. Anything made from it for the hub should be decided on purpose,
-because anyone who knows the server's address can read the hub.
+because anyone who knows the server's address can read the hub. That holds for what the
+ledger makes from the feed as well.
 
 The volume is the `archive` claim, which Argo CD never removes. Like the world, it is not on
 a separate disk, and the server's periodic backups do not include it.
+
+### The feed
+
+The archive answers one question, over HTTP on port 8080 of the `archive` Service: which
+rows has Prism written after a given one? The ledger asks it every so often, and so follows
+the grief log from a namespace of its own, where it cannot mount the server's files or this
+database.
+
+```text
+GET /feed/activities?after=0:500000&until=1794171400&limit=1000
+```
+
+- `after` is the cursor from the answer before. Leave it out to start from the first row,
+  which is also how everything is read again.
+- `until` is a time, in seconds since 1970. The rows end before the first one that happened
+  later, and no row is passed over to reach a later one. The ledger asks for rows up to a
+  few minutes ago, and so gets every row, in the order Prism wrote them.
+- `limit` is how many rows to give at the most. It is 1000 unless asked, and never more
+  than 5000.
+
+The answer is JSON with two things: `rows`, and `next`, the cursor to ask with next time.
+When there are no rows to give, `next` is the cursor that was asked with.
+
+Each row has `cursor`, `source`, `id` and `at`, which is when it happened, and then what
+Prism noted: `action`, `world`, `x`, `y`, `z`, `block`, `blockData`, `replacedBlock`,
+`item`, `quantity`, `entity`, `player`, `cause`, `causePlayer`, `causeEntity`,
+`causeBlock` and `reversed`. Where Prism has a number, the row
+has the name it stands for, such as `block-break`, `minecraft:oak_log` or a player's UUID
+and name. What is empty is left out. `player` is who something happened to, as in a death,
+and `causePlayer` is who did it.
+
+A row is given only once the names for its numbers have been copied as well, which is at
+the end of each minute's copying. Until then the feed ends at the row before it.
+
+What the archive holds is private, so the feed is kept narrow:
+
+- Only the ledger's pods can connect to it: pods named `dripcraft-ledger`, in the namespace
+  `dripcraft-ledger`, on that one port. Nothing in this namespace can, and the tunnel's
+  agent cannot be pointed at it.
+- It gives out and takes nothing in. It understands `GET` and nothing else, and reads the
+  archive through a connection of its own that cannot write.
+- Nothing a member may have written is in any row: not what is on a sign, not the name of
+  a renamed item or a name tag, and not what Prism keeps of the thing itself. Those are
+  Prism's `descriptor`, `metadata` and `serialized_data`, and they stay in the archive.
+
+Only Prism's rows are in the feed. Positions and the game's counters are not, yet.
+
+The feed runs in the same pod as the gathering, beside it. If it cannot start, or cannot
+answer, the gathering goes on and the pod's log says why. Rows are found by their number, a
+page at a time, so an answer takes a few megabytes however much the archive holds.
 
 ### Looking into it
 
@@ -369,6 +425,15 @@ of memory. Past that, the pod is stopped and started again, and a few seconds of
 are lost. That happened once, on the day it was set up. So let SQLite do its sorting on
 disk, which it does by itself in the pod's `/tmp`, and do not set `temp_store` to memory.
 Read a big answer row by row rather than all at once.
+
+To see what the feed gives, ask it from inside the pod, which is the one other place it can
+be reached from:
+
+```bash
+kubectl -n dripcraft-public exec deploy/archive -- python3 -c '
+import urllib.request
+print(urllib.request.urlopen("http://localhost:8080/feed/activities?limit=3").read().decode())'
+```
 
 ## Chest sorting
 
@@ -844,5 +909,6 @@ python -m unittest discover -s tests
 ```
 
 The tests need PyYAML and `kubectl`. The one that runs `manifests/player-stats.sh` also
-needs `sh` and `jq`, and is skipped without them. The one that runs `manifests/archive.py`
-needs nothing more than Python.
+needs `sh` and `jq`, and is skipped without them. The ones that run `manifests/archive.py`
+need nothing more than Python. One of them starts it for a few seconds and asks its feed on
+a port of the machine the tests run on.

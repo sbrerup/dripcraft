@@ -279,9 +279,33 @@ spec:
       ports:
         - {protocol: TCP, port: 443}
 ---
-# The archive holds everything the server has noted about its players. Nothing
-# connects to it, and it reaches only the survival server's map port, to ask who
-# is on the map. It has no way out to the internet.
+# The archive holds everything the server has noted about its players. It
+# reaches only the survival server's map port, to ask who is on the map, and has
+# no way out to the internet. The one thing that can connect to it is the ledger,
+# an application in a namespace of its own, which reads Prism's rows from the
+# feed. Nothing in this namespace can, and nothing else in the cluster.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: archive-ingress
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: archive
+  policyTypes: [Ingress]
+  ingress:
+    # One source: pods with the ledger's name, in the ledger's namespace. Both
+    # must hold, so the two selectors are one entry.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: dripcraft-ledger
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: dripcraft-ledger
+      ports:
+        - {protocol: TCP, port: 8080}
+---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

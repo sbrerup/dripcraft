@@ -17,13 +17,20 @@ in reading them can be put right later without having lost anything.
 The server's folder is mounted read-only, and Prism's database is opened
 read-only, so nothing here can change the world or the grief log. This must keep
 running whatever is in those files and whatever the server answers.
+
+It also answers one question, for the ledger, the application that is built on
+this: which rows has Prism written after a given one? That is the feed. It gives
+rows out and takes nothing in, and it reads the archive through a connection of
+its own that cannot write. Whatever happens to the feed, the gathering goes on.
 """
+import http.server
 import json
 import os
 import re
 import signal
 import sqlite3
 import sys
+import threading
 import time
 import urllib.parse
 import urllib.request
@@ -43,6 +50,11 @@ TOTALS_EVERY = float(os.environ.get("TOTALS_EVERY", "60"))
 BATCH = int(os.environ.get("BATCH", "20000"))
 # One look at each source and then stop, for the tests.
 ONCE = bool(os.environ.get("ONCE"))
+# Where the feed is answered. The archive's Service and network policy name the same port.
+FEED_PORT = int(os.environ.get("FEED_PORT", "8080"))
+# How many rows an answer of the feed holds when the question does not say, and at the most.
+FEED_ROWS = 1000
+FEED_MOST = 5000
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v) WITHOUT ROWID;
@@ -220,6 +232,10 @@ def copy_events(archive, now):
             )
         if again:
             put(archive, "prism_names_at", now)
+        # Every row copied so far now has what its numbers stand for here as well,
+        # so the feed may give it out. Written as the feed's cursors are: the
+        # source, then the row's number.
+        put(archive, "prism_named", f"{source}:{last}")
         archive.commit()
         return copied
     finally:
@@ -309,6 +325,227 @@ def save_totals(archive, now):
     return kept
 
 
+# The feed. Each question is answered through a connection of its own that can
+# only read, so nothing asked here can change the archive or hold the gathering up.
+
+# What the numbers in one of Prism's rows stand for: the name it gets here, the
+# column that holds the number, the table that says what it stands for, that
+# table's own number, and the columns wanted from it.
+NAMES = (
+    ("action", "action_id", "prism_actions", "action_id", ("action",)),
+    ("world", "world_id", "prism_worlds", "world_id", ("world",)),
+    ("block", "affected_block_id", "prism_blocks", "block_id", ("ns", "name", "data")),
+    ("replaced", "replaced_block_id", "prism_blocks", "block_id", ("ns", "name")),
+    ("item", "affected_item_id", "prism_items", "item_id", ("material",)),
+    ("entity", "affected_entity_type_id", "prism_entity_types", "entity_type_id", ("entity_type",)),
+    ("player", "affected_player_id", "prism_players", "player_id", ("player_uuid", "player")),
+    ("cause", "cause_id", "prism_causes", "cause_id", ("cause",)),
+    ("cause_player", "cause_player_id", "prism_players", "player_id", ("player_uuid", "player")),
+    ("cause_entity", "cause_entity_type_id", "prism_entity_types", "entity_type_id", ("entity_type",)),
+    ("cause_block", "cause_block_id", "prism_blocks", "block_id", ("ns", "name")),
+)
+# The columns of a row that are given as they are. Three are not among them and
+# are never given out, because they can hold what a member wrote, on a sign, a
+# name tag or an item they renamed: "descriptor", "metadata" and what Prism keeps
+# of the thing itself, "serialized_data".
+PLAIN = ("x", "y", "z", "affected_item_quantity", "reversed")
+
+
+def cursor(text):
+    """The source and number of the row a cursor stands for. An empty one comes before every row."""
+    if not text:
+        return (-1, 0)
+    if not re.fullmatch(r"[0-9]{1,18}:[0-9]{1,18}", text):
+        raise ValueError("after is not a cursor that this feed gave out")
+    source, number = text.split(":")
+    return (int(source), int(number))
+
+
+def feed_statement(db):
+    """The question that reads rows for the feed, and what each column of its answer is.
+
+    It is made from the columns the archive has, which are Prism's own. So a
+    Prism with other columns is followed here too, with less in each row. Rows
+    are found by their number and come in that order, so nothing is sorted, and
+    no more is read than is given.
+    """
+    columns = {}
+
+    def of(table):
+        if table not in columns:
+            columns[table] = {row[1] for row in db.execute(f"PRAGMA table_info({named(table)})")}
+        return columns[table]
+
+    have = of("prism_activities")
+    if not {"source", "activity_id", "timestamp"} <= have:
+        return None, None
+    picked = ["a.source", "a.activity_id", "a.timestamp"]
+    keys = ["source", "id", "at"]
+    joins = []
+    for column in PLAIN:
+        if column in have:
+            picked.append(f"a.{named(column)}")
+            keys.append(column)
+    for short, column, table, number, wanted in NAMES:
+        if column not in have or not {"source", number} <= of(table):
+            continue
+        joins.append(
+            f"LEFT JOIN {named(table)} {named(short)} ON {named(short)}.source = a.source"
+            f" AND {named(short)}.{named(number)} = a.{named(column)}"
+        )
+        for name in wanted:
+            if name in of(table):
+                picked.append(f"{named(short)}.{named(name)}")
+                keys.append(f"{short}.{name}")
+    statement = (
+        f"SELECT {', '.join(picked)} FROM prism_activities a {' '.join(joins)}"
+        " WHERE (a.source, a.activity_id) > (?, ?) AND (a.source, a.activity_id) <= (?, ?)"
+        " ORDER BY a.source, a.activity_id LIMIT ?"
+    )
+    return statement, keys
+
+
+def feed_row(got):
+    """One of Prism's rows as the feed gives it: names for numbers, and nothing that is empty."""
+
+    def block(short):
+        name = got.get(short + ".name")
+        if name is None:
+            return None
+        space = got.get(short + ".ns")
+        return f"{space}:{name}" if space else name
+
+    def player(short):
+        known = (("uuid", got.get(short + ".player_uuid")), ("name", got.get(short + ".player")))
+        return {key: value for key, value in known if value is not None} or None
+
+    row = {
+        "cursor": f"{got['source']}:{got['id']}",
+        "source": got["source"],
+        "id": got["id"],
+        "at": got["at"],
+        "action": got.get("action.action"),
+        "world": got.get("world.world"),
+        "x": got.get("x"),
+        "y": got.get("y"),
+        "z": got.get("z"),
+        "block": block("block"),
+        "blockData": got.get("block.data") or None,
+        "replacedBlock": block("replaced"),
+        "item": got.get("item.material"),
+        "quantity": got.get("affected_item_quantity"),
+        "entity": got.get("entity.entity_type"),
+        "player": player("player"),
+        "cause": got.get("cause.cause"),
+        "causePlayer": player("cause_player"),
+        "causeEntity": got.get("cause_entity.entity_type"),
+        "causeBlock": block("cause_block"),
+    }
+    if got.get("reversed") is not None:
+        row["reversed"] = bool(got["reversed"])
+    return {key: value for key, value in row.items() if value is not None}
+
+
+def feed_page(after="", until=None, limit=None):
+    """Prism's rows after a cursor, in the order they were recorded, and the cursor to ask with next.
+
+    The rows end before the first one that happened later than "until", and none
+    is passed over to reach a later one. A caller that stays a little behind the
+    present therefore gets every row, in order. A row is given only once what its
+    numbers stand for has been copied as well. With nothing to give, the cursor
+    to ask with next is the one that was asked with.
+    """
+    start = cursor(after)
+    limit = max(1, min(FEED_MOST, FEED_ROWS if limit is None else limit))
+    rows = []
+    if not os.path.exists(ARCHIVE):
+        return rows, after
+    address = "file:" + urllib.parse.quote(ARCHIVE) + "?mode=ro"
+    db = sqlite3.connect(address, uri=True, timeout=10)
+    try:
+        db.execute("PRAGMA cache_size=-2000")
+        statement, keys = feed_statement(db)
+        if statement is None:
+            return rows, after
+        try:
+            end = cursor(get(db, "prism_named") or "")
+        except (sqlite3.OperationalError, ValueError):
+            return rows, after
+        for found in db.execute(statement, (*start, *end, limit)):
+            got = dict(zip(keys, found))
+            if until is not None and isinstance(got["at"], (int, float)) and got["at"] > until:
+                break
+            rows.append(feed_row(got))
+        return rows, rows[-1]["cursor"] if rows else after
+    finally:
+        db.close()
+
+
+def asked_number(given, name):
+    """A whole number in a question to the feed, or None when it is not there."""
+    text = given.get(name, [""])[-1]
+    if not text:
+        return None
+    if not re.fullmatch(r"[0-9]{1,18}", text):
+        raise ValueError(f"{name} is not a whole number")
+    return int(text)
+
+
+class Feed(http.server.BaseHTTPRequestHandler):
+    """Answers the feed's one question. Only GET is understood, so nothing can be sent in."""
+
+    # A caller that connects and then says nothing is let go of.
+    timeout = 30
+
+    def do_GET(self):
+        try:
+            asked = urllib.parse.urlsplit(self.path)
+        except ValueError:
+            return self.answer(400, {"error": "The address cannot be read."})
+        if asked.path != "/feed/activities":
+            return self.answer(404, {"error": "There is nothing at this address."})
+        given = urllib.parse.parse_qs(asked.query, keep_blank_values=True)
+        try:
+            after = given.get("after", [""])[-1]
+            cursor(after)
+            until = asked_number(given, "until")
+            limit = asked_number(given, "limit")
+        except ValueError as problem:
+            return self.answer(400, {"error": str(problem)})
+        try:
+            rows, last = feed_page(after, until, limit)
+        except Exception as problem:
+            say(f"The feed could not answer: {type(problem).__name__}: {problem}")
+            return self.answer(500, {"error": "The archive could not be read just now."})
+        return self.answer(200, {"rows": rows, "next": last})
+
+    def answer(self, status, body):
+        text = json.dumps(body, separators=(",", ":")).encode()
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(text)))
+            self.end_headers()
+            self.wfile.write(text)
+        except OSError:
+            pass  # The caller has gone.
+
+    def log_message(self, *args):
+        """Questions are not logged. The log is for what the gathering has to say."""
+
+
+def serve_feed():
+    """Answers the feed for as long as the pod runs, and starts again if it cannot."""
+    while True:
+        try:
+            with http.server.ThreadingHTTPServer(("", FEED_PORT), Feed) as server:
+                print(f"Answering the feed on port {server.server_address[1]}.", flush=True)
+                server.serve_forever()
+        except Exception as problem:
+            say(f"The feed cannot be answered: {type(problem).__name__}: {problem}")
+        time.sleep(30)
+
+
 TASKS = {
     "positions": (POSITIONS_EVERY, sample_positions),
     "events": (EVENTS_EVERY, copy_events),
@@ -320,6 +557,9 @@ def main():
     # As the first process in a container, this is not stopped by a request to
     # stop unless it asks to be.
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+    if not ONCE:
+        # Beside the gathering, and ended with it. Nothing it does can stop the loop below.
+        threading.Thread(target=serve_feed, daemon=True).start()
     archive = None
     due = dict.fromkeys(TASKS, 0.0)
     done = dict.fromkeys(TASKS, 0)

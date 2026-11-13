@@ -104,6 +104,20 @@ class DripcraftPublicTests(unittest.TestCase):
         ops = {op["$set"]["path"]: op["$set"]["value"] for op in patch["ops"]}
         self.assertEqual(ops, {"$['enable_replant']": False, "$['tools']['durability_multiplier']": 1})
 
+    def test_netherite_on_the_ground_is_gone_in_thirty_seconds(self):
+        patch = next(p for p in self.patches if p["file"] == "/data/config/paper-world-defaults.yml")
+        ops = {op["$set"]["path"]: op["$set"] for op in patch["ops"]}
+        rate = "$['entities']['spawning']['alt-item-despawn-rate']"
+        enabled = ops[rate + "['enabled']"]
+        self.assertEqual((enabled["value"], enabled["value-type"]), (True, "bool"))
+        # The whole list is set rather than added to: Paper's own list has cobblestone in
+        # it at 15 seconds, and turning the option on would bring that along.
+        items = ops[rate + "['items']"]["value"]
+        self.assertTrue(items)
+        self.assertEqual([name for name in items if not name.startswith("netherite_")], [])
+        # In ticks, 20 to a second.
+        self.assertEqual(set(items.values()), {30 * 20})
+
     def test_discord_cannot_run_server_commands_or_change_the_channel(self):
         patches = json.loads((ROOT / "manifests" / "tuning-patches.json").read_text())["patches"]
         patch = next(p for p in patches if p["file"] == "/data/plugins/DiscordSRV/config.yml")

@@ -60,6 +60,36 @@
               "nether_quartz_ore"
             ]
           }
+        },
+        {
+          "$set": {
+            "path": "$['entities']['spawning']['alt-item-despawn-rate']['enabled']",
+            "value": true,
+            "value-type": "bool"
+          }
+        },
+        {
+          "$set": {
+            "path": "$['entities']['spawning']['alt-item-despawn-rate']['items']",
+            "value": {
+              "netherite_ingot": 600,
+              "netherite_scrap": 600,
+              "netherite_block": 600,
+              "netherite_upgrade_smithing_template": 600,
+              "netherite_sword": 600,
+              "netherite_spear": 600,
+              "netherite_pickaxe": 600,
+              "netherite_axe": 600,
+              "netherite_shovel": 600,
+              "netherite_hoe": 600,
+              "netherite_helmet": 600,
+              "netherite_chestplate": 600,
+              "netherite_leggings": 600,
+              "netherite_boots": 600,
+              "netherite_horse_armor": 600,
+              "netherite_nautilus_armor": 600
+            }
+          }
         }
       ]
     },

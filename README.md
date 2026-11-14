@@ -764,7 +764,9 @@ ledger (below).
 
 The `player-stats` container beside Caddy in the `web-map` pod runs
 `manifests/player-stats.sh`. Every five minutes it gathers the files into one, with names
-from the whitelist and the server's name cache, and Caddy serves that with the hub.
+from the whitelist and the server's name cache, and Caddy serves that with the hub. Of
+everything the game counts for a player, only the time played is copied into it: the
+other counters, a player's deaths among them, stay in the files on the server.
 Only that container mounts the server's folder, read-only,
 so Caddy never sees it, and changing the hub or the script restarts the proxy and not the
 server.

@@ -445,12 +445,16 @@ class DripcraftPublicTests(unittest.TestCase):
                     self.assertNotRegex(file.read_text(errors="replace"), r"\d+\.\d+\.\d+\.\d+", file.name)
             # The name a player last joined with wins over the whitelist's.
             self.assertEqual([players[u]["name"] for u in ("aaaa", "bbbb", "cccc")], ["NewName", ".Bedrock", None])
-            self.assertEqual(players["aaaa"]["stats"]["custom"], {"play_time": 1200})
-            self.assertEqual(players["aaaa"]["stats"]["mined"], {"stone": 3})
-            self.assertEqual(players["cccc"]["stats"]["killed_by"], {"zombie": 1})
-            self.assertEqual(
-                set(players["bbbb"]["stats"]), {"custom", "mined", "crafted", "used", "broken", "killed", "killed_by"}
-            )
+            # Of the game's counters only the time played reaches the page. What a
+            # player mined, and what killed them, stay on the server.
+            self.assertEqual(players["aaaa"]["stats"], {"custom": {"play_time": 1200}})
+            self.assertEqual(players["bbbb"]["stats"], {"custom": {"play_time": 0}})
+            self.assertEqual(players["cccc"]["stats"], {"custom": {"play_time": 0}})
+            for uuid in ("aaaa", "bbbb", "cccc"):
+                self.assertEqual(set(players[uuid]), {"uuid", "name", "seen", "country", "skin", "stats"})
+            text = out.read_text()
+            for word in ("mined", "stone", "killed_by", "zombie", "deaths"):
+                self.assertNotIn(word, text)
             self.assertIsInstance(players["aaaa"]["seen"], int)
 
             # A file the game is halfway through writing leaves the last good copy alone,

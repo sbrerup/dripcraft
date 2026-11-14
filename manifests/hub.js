@@ -9,12 +9,13 @@ const NS = "http://www.w3.org/2000/svg";
 const number = new Intl.NumberFormat("en");
 const regions = new Intl.DisplayNames(["en"], { type: "region" });
 const custom = (p, key) => p.stats.custom[key] || 0;
-const sum = (object) => Object.values(object).reduce((a, b) => a + b, 0);
-const distance = (p) => Object.entries(p.stats.custom).reduce((a, [k, v]) => a + (k.endsWith("_one_cm") ? v : 0), 0);
+const total = (list) => list.reduce((a, b) => a + b, 0);
 const count = (n) => number.format(n);
-const km = (cm) => cm >= 1e8 ? count(Math.round(cm / 1e5)) + " km" : cm >= 1e5 ? (cm / 1e5).toFixed(1) + " km" : Math.round(cm / 100) + " m";
-const hearts = (tenths) => count(Math.round(tenths / 20)) + " hearts";
+// A height in the world, with a proper minus sign below zero.
+const height = (y) => "y " + (y < 0 ? "\u2212" + count(-y) : count(y));
 const calm = matchMedia("(prefers-reduced-motion: reduce)");
+// Times are shown in the visitor's own time, on a twelve-hour clock for those who use one.
+const clock = new Intl.DateTimeFormat([], { hour: "numeric" }).resolvedOptions().hour12 ? "en-US" : "en-GB";
 
 function duration(ticks) {
   const minutes = Math.floor(ticks / 1200);
@@ -39,14 +40,67 @@ function pretty(id) {
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
+// A block or an item as the game names it: "minecraft:spruce_planks" becomes "Spruce planks".
+const thing = (name) => pretty(name.replace(/^minecraft:/, ""));
+
+// What gets us, and what a member has hunted. A creature as the game names it is
+// put in the plural, so "cave_spider" becomes "Cave spiders", and the world's own
+// causes, such as "fall", get a word of their own.
+const CAUSES = {
+  fall: "Falling", lava: "Lava", drowning: "Drowning", fire: "Fire", "fire tick": "Burning",
+  suffocation: "Suffocating", starvation: "Hunger", void: "The void", "block explosion": "Explosions",
+  "entity explosion": "Explosions", lightning: "Lightning", magic: "Magic", poison: "Poison",
+  wither: "Withering", freeze: "Freezing", contact: "Prickly plants", "fly into wall": "Flying into walls",
+  "hot floor": "Magma blocks", "falling block": "Falling blocks", cramming: "Crowding",
+  "dragon breath": "Dragon's breath", thorns: "Thorns", "sonic boom": "Sonic booms",
+  campfire: "Campfires", "world border": "The world border",
+};
+const CREATURES = {
+  wolf: "Wolves", ender_dragon: "The Ender Dragon", drowned: "Drowned", bogged: "Bogged",
+  silverfish: "Silverfish", pufferfish: "Pufferfish", tropical_fish: "Tropical fish", cod: "Cod",
+  salmon: "Salmon", sheep: "Sheep", squid: "Squid", glow_squid: "Glow squid",
+};
+function creatures(name) {
+  const id = name.replace(/^minecraft:/, "");
+  if (CAUSES[id]) return CAUSES[id];
+  if (CREATURES[id]) return CREATURES[id];
+  if (/[^a-z_]/.test(id)) return pretty(id);
+  if (id.endsWith("man")) return pretty(id.slice(0, -3) + "men");
+  return pretty(id + (/(s|x|ch|sh)$/.test(id) ? "es" : "s"));
+}
+
 function country(code) {
   try { return regions.of(code) || code; } catch (error) { return code; }
 }
 
-function ordinal(n) {
-  const tail = n % 100 >= 11 && n % 100 <= 13 ? "th" : ["th", "st", "nd", "rd"][n % 10] || "th";
-  return n + tail;
+// A date keeps its day and month on one line.
+const unbroken = (text) => text.replace(/(\d+) /, "$1\u00a0");
+
+// A day of the server's calendar, "2026-11-13", as "13 Nov", or in full as
+// "Friday 13 November". The year shows only when it is not this one.
+function dayName(day, full) {
+  const date = new Date(day + "T12:00:00Z");
+  const options = { day: "numeric", month: full ? "long" : "short", timeZone: "UTC" };
+  if (full) options.weekday = "long";
+  if (date.getUTCFullYear() !== new Date().getFullYear()) options.year = "numeric";
+  return unbroken(date.toLocaleDateString("en-GB", options));
 }
+
+// An hour, given by when it began in seconds, in the visitor's own time: the day,
+// and from when to when.
+function hourName(at, full) {
+  const from = new Date(at * 1000);
+  const options = { day: "numeric", month: full ? "long" : "short" };
+  if (full) options.weekday = "long";
+  if (from.getFullYear() !== new Date().getFullYear()) options.year = "numeric";
+  const day = unbroken(from.toLocaleDateString("en-GB", options));
+  if (!full) return day;
+  const time = (date) => date.toLocaleTimeString(clock, { hour: "numeric", minute: "2-digit" });
+  return day + ", " + time(from) + " to " + time(new Date(at * 1000 + 3600000));
+}
+
+// An hour of the day, 0 to 23, as the visitor's clock shows it.
+const hourOfDay = (h) => new Date(2026, 0, 1, h).toLocaleTimeString(clock, clock === "en-US" ? { hour: "numeric" } : { hour: "2-digit", minute: "2-digit" });
 
 // Makes an element with what goes inside it: other elements, or text.
 function make(tag, className, ...children) {
@@ -407,46 +461,28 @@ function frames(now) {
   if (moving.size) requestAnimationFrame(frames);
 }
 
-const TRAVEL = {
-  walk: "Walked", sprint: "Sprinted", crouch: "Crouched", swim: "Swum", fly: "Flown",
-  aviate: "By elytra", boat: "By boat", horse: "By horse", minecart: "By minecart",
-  pig: "By pig", strider: "By strider", climb: "Climbed", fall: "Fallen",
-  walk_on_water: "Walked on water", walk_under_water: "Walked under water",
-};
-
-const COLUMNS = [
-  { label: "Member", get: (p) => p.name.toLowerCase(), text: true },
-  { label: "Play time", tile: "Time played", get: (p) => custom(p, "play_time"), show: duration },
-  { label: "Last played", get: (p) => p.seen || 0, show: ago },
-  { label: "Deaths", tile: "Deaths", get: (p) => custom(p, "deaths") },
-  { label: "Mob kills", tile: "Mobs killed", get: (p) => custom(p, "mob_kills") },
-  { label: "Blocks mined", tile: "Blocks mined", get: (p) => sum(p.stats.mined) },
-  { label: "Travelled", tile: "Travelled", get: distance, show: km },
-  { label: "Items crafted", tile: "Items crafted", get: (p) => sum(p.stats.crafted) },
-  { label: "Trades", tile: "Villager trades", get: (p) => custom(p, "traded_with_villager") },
-];
-const shown = (column, p) => (column.show ? column.show(column.get(p)) : count(column.get(p)));
-
-const RECORDS = [
-  { label: "Homebody", what: "played", column: 1 },
-  { label: "Deepest digger", what: "blocks mined", column: 5 },
-  { label: "Monster hunter", what: "mobs killed", column: 4 },
-  { label: "Wanderer", what: "travelled", column: 6 },
-  { label: "Best customer", what: "trades with villagers", column: 8 },
-  { label: "Most adventurous", what: "deaths", column: 3 },
-];
-
 let players = [];
 // "waiting" until the numbers have come once, then "ready", or "empty" if there are none.
 let state = "waiting";
 // When the numbers were written. A file saved within a few minutes of that belongs
 // to someone who is playing, because the game saves everyone who is online together.
 let updated = 0;
-let sort = { column: 1, down: true };
 const playing = (p) => p.seen && updated - p.seen < 7 * 60;
 const home = (p) => "/members/" + encodeURIComponent(p.name);
 const status = (p) => (playing(p) ? "Playing now" : "Last played " + ago(p.seen));
 const dot = () => make("i", "live");
+// Members in the order of their names, which is the order lists of them keep. A
+// Bedrock player's name starts with a dot, which is not counted.
+const byName = (a, b) => a.name.replace(/^\./, "").localeCompare(b.name.replace(/^\./, ""), "en", { sensitivity: "base" });
+
+// What the ledger has counted from the server's log, which the script fetches (see
+// README): blocks placed and broken, the server's days and moments, and for each
+// member by their id what they built with, hunted and traded for, their hours and
+// their own bests. Null until it has come, and the hub shows what it can without it.
+// Time played and when someone last played come from the game's own files instead.
+let counted = null;
+let tallies = new Map();
+const tally = (p) => tallies.get(p.uuid) || null;
 
 // The feats, which the ledger keeps and the script fetches (see README): which
 // there are, and what each member holds, by their id. Both stay empty until they
@@ -517,13 +553,70 @@ function told(line) {
   return null;
 }
 
-// Each record with the member who holds it, leaving out records nobody has a number for.
-function holders() {
-  return RECORDS.map((record) => {
-    const column = COLUMNS[record.column];
-    const best = players.reduce((a, b) => (column.get(b) > column.get(a) ? b : a), players[0]);
-    return { ...record, best, text: shown(column, best) + " " + record.what, any: column.get(best) > 0 };
-  }).filter((record) => record.any);
+// Small drawings for the moments, in the style of the row of pages.
+const DRAWINGS = {
+  day: '<rect x="8" y="8" width="8" height="8" rx="1"/><path d="M12 2.5V5M12 19v2.5M2.5 12H5M19 12h2.5M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M5.3 18.7l1.8-1.8M16.9 7.1l1.8-1.8"/>',
+  hour: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+  together: '<circle cx="9" cy="8.2" r="3.2"/><path d="M3 19.5c0-3.2 2.7-5.3 6-5.3s6 2.1 6 5.3M15.5 5.3a3.2 3.2 0 0 1 0 5.8M17.5 14.7c2.1.7 3.5 2.4 3.5 4.8"/>',
+  deep: '<path d="M3.5 6.5h17M12 9.5v10M8.5 16 12 19.5l3.5-3.5"/>',
+  high: '<path d="M3.5 19.5h17M12 16.5v-11M8.5 9 12 5.5 15.5 9"/>',
+};
+function drawn(name) {
+  const node = document.createElementNS(NS, "svg");
+  node.setAttribute("viewBox", "0 0 24 24");
+  node.setAttribute("class", "mark");
+  node.setAttribute("aria-hidden", "true");
+  node.innerHTML = DRAWINGS[name];
+  return node;
+}
+
+// The moments worth remembering, for the whole server and with no names: the
+// biggest day, the busiest hour, the hour with most of us at work, and the deepest
+// dig and highest build anyone has made. Each has a short way and a full way to
+// say when. Hours are shown in the visitor's own time.
+function moments() {
+  if (!counted) return [];
+  const { biggestDay, busiestHour, fullestHour } = counted.moments || {};
+  const all = [];
+  if (biggestDay) all.push({ drawing: "day", label: "The biggest day", value: count(biggestDay.blocks) + " blocks",
+    when: dayName(biggestDay.day), told: "placed and broken on " + dayName(biggestDay.day, true) });
+  if (busiestHour) all.push({ drawing: "hour", label: "The busiest hour", value: count(busiestHour.blocks) + " blocks",
+    when: hourName(busiestHour.at), told: "placed and broken in one hour, " + hourName(busiestHour.at, true), hour: true });
+  if (fullestHour) all.push({ drawing: "together", label: "The fullest hour", value: fullestHour.members === 1 ? "One of us" : count(fullestHour.members) + " of us",
+    when: hourName(fullestHour.at), told: "at work in the same hour, " + hourName(fullestHour.at, true), hour: true });
+  const bests = counted.members.map((t) => t.bests || {});
+  const deep = bests.map((b) => b.deepest).filter((y) => typeof y === "number");
+  const high = bests.map((b) => b.highest).filter((y) => typeof y === "number");
+  if (deep.length) all.push({ drawing: "deep", label: "The deepest dig", value: height(Math.min(...deep)), told: "the deepest anyone has dug" });
+  if (high.length) all.push({ drawing: "high", label: "The highest build", value: height(Math.max(...high)), told: "the highest anyone has built" });
+  return all;
+}
+
+// When a member plays, from the things they did in each hour of the day: the hours
+// moved into the visitor's own time, and the part of the day that holds most of
+// them, if one holds at least a good third.
+const PARTS = [["at night", 0], ["in the morning", 6], ["in the afternoon", 12], ["in the evening", 18]];
+function rhythm(t) {
+  if (!t || !Array.isArray(t.hours) || t.hours.length !== 24) return null;
+  const shift = -new Date().getTimezoneOffset() / 60;
+  const hours = new Array(24).fill(0);
+  t.hours.forEach((n, h) => { hours[((Math.floor(h + shift) % 24) + 24) % 24] += n; });
+  const all = total(hours);
+  if (!all) return null;
+  const parts = PARTS.map(([words, from]) => ({ words, from, share: total(hours.slice(from, from + 6)) / all }));
+  const most = parts.reduce((a, b) => (b.share > a.share ? b : a));
+  const clear = most.share >= 0.35;
+  return { hours, from: clear ? most.from : null, words: clear ? "Mostly here " + most.words : "Here at all hours" };
+}
+
+// One line about a member from what the ledger counts, with no number in it: when
+// they are usually about, which also tells the others when to find them.
+function gist(p) {
+  const t = tally(p);
+  const when = rhythm(t);
+  if (when) return when.words;
+  if (t && t.buildsWith && t.buildsWith.length) return "Builds mostly with " + thing(t.buildsWith[0].name).toLowerCase();
+  return null;
 }
 
 // The landscape. Every page opens with a view over the acres: a sky, hills that
@@ -829,16 +922,97 @@ function arrow() {
   return node;
 }
 
+// A short list of things and how many of each, largest first, with a bar for each
+// measured against the first. The numbers are one member's or the whole server's,
+// and never set one member against another.
+function bars(entries, show) {
+  const top = entries.filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]).slice(0, 12);
+  if (!top.length) return null;
+  const ol = make("ol", "bars");
+  for (const [name, n] of top) {
+    const li = make("li", null, make("span", null, name), make("b", null, (show || count)(n)));
+    li.style.setProperty("--share", (100 * n / top[0][1]).toFixed(1) + "%");
+    ol.append(li);
+  }
+  return ol;
+}
+
+// Bars standing side by side, as tall as their numbers, for days or hours. Those
+// named in "lit" stand out, and "gold" marks one.
+function strip(className, values, lit, gold, label) {
+  const most = Math.max(1, ...values);
+  const box = make("div", "strip " + className);
+  values.forEach((n, index) => {
+    const bar = make("i", index === gold ? "gold" : lit(index) ? "lit" : null);
+    bar.style.height = (100 * n / most).toFixed(1) + "%";
+    box.append(bar);
+  });
+  box.setAttribute("role", "img");
+  box.setAttribute("aria-label", label);
+  return box;
+}
+
+// The way to a million blocks placed and broken, all of us together, notched every
+// hundred thousand like the bar of experience in the game.
+const MILLION = 1e6;
+function road() {
+  const done = counted.placed + counted.broken;
+  const reached = done >= MILLION;
+  const track = make("div", reached ? "track reached" : "track", make("i"));
+  track.firstChild.style.width = Math.min(100, 100 * done / MILLION).toFixed(2) + "%";
+  track.setAttribute("role", "img");
+  track.setAttribute("aria-label", reached ? "Reached" : Math.floor(100 * done / MILLION) + "% of the way");
+  return make("section", "card road",
+    make("h2", null, "The road to the first million"),
+    make("p", "sofar", make("strong", null, count(done)), make("span", null, "blocks placed and broken" + (reached ? ", all of us together" : " so far"))),
+    track,
+    reached
+      ? make("p", "ends", make("span", "done", "The first million is reached"))
+      : make("p", "ends", make("span", null, Math.floor(100 * done / MILLION) + "% of the way"), make("span", null, count(MILLION - done) + " to go")));
+}
+
+// The server's days, the latest four weeks of them, with the biggest day marked.
+// Days are counted by the calendar, so a day with nothing in it shows as a gap.
+function daysCard() {
+  const days = (counted.days || []).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d.day));
+  if (!days.length) return null;
+  const known = new Map(days.map((d) => [d.day, d.placed + d.broken]));
+  const at = (day) => Date.parse(day + "T00:00:00Z");
+  const last = at(days[days.length - 1].day);
+  const first = Math.max(at(days[0].day), last - 27 * 86400000);
+  const shown = [];
+  for (let t = first; t <= last; t += 86400000) {
+    const day = new Date(t).toISOString().slice(0, 10);
+    shown.push({ day, blocks: known.get(day) || 0 });
+  }
+  const big = counted.moments && counted.moments.biggestDay;
+  const gold = big ? shown.findIndex((d) => d.day === big.day) : -1;
+  const since = first === at(days[0].day);
+  const label = "Blocks placed and broken each day from " + dayName(shown[0].day, true) + " to " + dayName(shown[shown.length - 1].day, true);
+  return make("section", "card days",
+    make("h2", null, "Day by day"),
+    make("p", "note", since ? "Blocks placed and broken each day since " + dayName(days[0].day) + "." : "Blocks placed and broken each day, the latest four weeks."),
+    strip("daily", shown.map((d) => d.blocks), () => true, gold, label),
+    make("p", "ends", make("span", null, dayName(shown[0].day)), make("span", null, dayName(shown[shown.length - 1].day))),
+    big && make("p", "key", gold >= 0 && make("i"), "The biggest day, " + dayName(big.day, true) + ": " + count(big.blocks) + " blocks."));
+}
+
+// A row of the noticeboard: a moment, the way a member's row has a face.
+function notice(moment) {
+  return make("li", null, link("/moments", null, drawn(moment.drawing),
+    make("span", null, make("b", null, moment.value), make("small", null, moment.label)), moment.when && make("em", null, moment.when)));
+}
+
 function homePage() {
   const hours = Math.round(players.reduce((a, p) => a + custom(p, "play_time"), 0) / 72000);
   const here = players.filter(playing).length;
   const words = make("div", "words",
     make("p", "over", "Welcome back to"),
     make("h1", null, "Lush Acres"),
-    make("p", "tally",
-      count(hours) + " hours together, " +
-      count(players.reduce((a, p) => a + sum(p.stats.mined), 0)) + " blocks mined and " +
-      km(players.reduce((a, p) => a + distance(p), 0)) + " wandered."),
+    // A number keeps to the word after it, so a line never breaks between them.
+    make("p", "tally", counted
+      ? count(hours) + "\u00a0hours together, " + count(counted.placed) + "\u00a0blocks placed and " + count(counted.broken) + "\u00a0broken."
+      : count(hours) + "\u00a0hours together on the acres."),
     make("p", here ? "now on" : "now", here ? dot() : null,
       here ? (here === 1 ? "One of us is playing right now" : here + " of us are playing right now") : "The meadow is quiet right now"),
   );
@@ -848,9 +1022,11 @@ function homePage() {
     .forEach((p) => recent.append(person(p, playing(p) ? "Playing now" : ago(p.seen))));
   const around = make("section", "card", make("h2", null, "Around the acres"), recent, link("/members", "more", "Everyone", arrow()));
 
-  const best = make("ul", "people");
-  holders().slice(0, 5).forEach((record) => best.append(person(record.best, shown(COLUMNS[record.column], record.best), record.label)));
-  const board = make("section", "card", make("h2", null, "On the noticeboard"), best, link("/records", "more", "All the records", arrow()));
+  const remembered = moments();
+  const board = remembered.length
+    ? make("section", "card", make("h2", null, "On the noticeboard"), make("ul", "people", ...remembered.slice(0, 4).map(notice)),
+      link("/moments", "more", "All the moments", arrow()))
+    : null;
 
   const earned = make("ul", "people");
   const newest = earnings().slice(0, 5);
@@ -859,10 +1035,26 @@ function homePage() {
     ? make("section", "card", make("h2", null, "Lately earned"), earned, link("/feats", "more", "All the feats", arrow()))
     : null;
 
+  // What all of us have done together, from what the ledger counts.
+  let together = null;
+  if (counted) {
+    // The eight most used, as in a member's own lists, so the card stays short on a phone.
+    const built = bars(counted.builtFrom.most.slice(0, 8).map((e) => [thing(e.name), e.count]));
+    // What the ledger could not put a name to, and a member killed by another member,
+    // are left out: the first says nothing and the second would point at someone.
+    const known = counted.whatGetsUs.filter((e) => e.name !== "unknown" && e.name !== "another member");
+    const gets = bars(known.map((e) => [creatures(e.name), e.count]), (n) => count(n) + (n === 1 ? " time" : " times"));
+    together = make("div", "together", road(), daysCard(),
+      built && make("section", "card", make("h2", null, "What Lush Acres is built from"),
+        make("p", "note", count(counted.builtFrom.kinds) + " kinds of block placed in all."), built),
+      gets && make("section", "card", make("h2", null, "What gets us"),
+        make("p", "note", "The usual suspects, for all of us together."), gets));
+  }
+
   const doors = make("div", "doors");
   for (const [href, name, text] of [
     ["/members", "Members", "Everyone who calls the acres home."],
-    ["/records", "Records", "Who has been up to what."],
+    remembered.length && ["/moments", "Moments", "Days and hours to remember."],
     feats.length && ["/feats", "Feats", "Earned alone and together."],
     ["/map/", "The map", "See what everyone has built."],
   ].filter(Boolean)) {
@@ -871,7 +1063,8 @@ function homePage() {
   }
 
   const box = new DocumentFragment();
-  box.append(scene("home", 3, words, ...lineup(40)), make("div", "page", staggered(make("div", "two", around, board, lately)), staggered(doors)));
+  box.append(scene("home", 3, words, ...lineup(40)), make("div", "page",
+    staggered(make("div", "two", around, board, lately)), together && staggered(together), staggered(doors)));
   return box;
 }
 
@@ -914,43 +1107,64 @@ function featsPage() {
 
 function membersPage() {
   const grid = make("div", "members");
-  // Whoever is playing first, then whoever was here last.
-  [...players].sort((a, b) => (b.seen || 0) - (a.seen || 0)).forEach((p, index) => {
-    const where = make("span", playing(p) ? "status on" : "status", playing(p) && dot(), playing(p) ? "Playing now" : ago(p.seen));
+  [...players].sort(byName).forEach((p, index) => {
+    const where = make("span", playing(p) ? "status on" : "status", playing(p) && dot(), playing(p) ? "Playing now" : "Last played " + ago(p.seen));
+    const line = gist(p);
     const a = link(home(p), "card member",
       plot(100 + index * 13, figure(p, "body", 132)),
       called("strong", p, p.country && flag(p.country)),
       where,
-      make("small", null, duration(custom(p, "play_time")) + " played"),
+      line && make("small", null, line),
       p.name.startsWith(".") && make("span", "chip", "Bedrock"));
     a.dataset.uuid = p.uuid;
     grid.append(a);
   });
   const words = make("div", "words", make("h1", null, "Members"), make("p", "tally", "Everyone who calls the acres home."));
   const box = new DocumentFragment();
-  box.append(scene("sub", 11, words, acre(3, 60, true)), make("div", "page", staggered(grid)));
+  const told = players.some((p) => rhythm(tally(p))) && make("p", "aside", "Times of day are shown in your own time.");
+  box.append(scene("sub", 11, words, acre(3, 60, true)), make("div", "page", staggered(grid), told));
   return box;
 }
 
-// A plain list has no bars, for numbers that do not compare with each other.
-function list(title, entries, show, bare) {
-  const box = make("section", "card", make("h3", null, title));
-  const top = entries.filter(([, value]) => value > 0).sort((a, b) => b[1] - a[1]).slice(0, bare ? 20 : 8);
-  if (!top.length) {
-    box.append(make("p", null, "Nothing yet"));
-    return box;
-  }
-  const ol = make("ol", bare ? "bare" : null);
-  for (const [name, value] of top) {
-    const li = make("li", null, make("span", null, name), make("b", null, (show || count)(value)));
-    if (!bare) li.style.setProperty("--share", (100 * value / top[0][1]).toFixed(1) + "%");
-    ol.append(li);
-  }
-  box.append(ol);
-  return box;
+// A panel on a member's page with a list of what they did most. Nothing when the
+// list is empty.
+function list(title, entries, note) {
+  const ol = bars(entries);
+  return ol && make("section", "card", make("h3", null, title), note && make("p", "note", note), ol);
 }
 
-const named = (object) => Object.entries(object).map(([id, value]) => [pretty(id), value]);
+// When a member plays, as a line and as the hours of the day in the visitor's time.
+function whenCard(when) {
+  const lit = (h) => when.from === null || (h >= when.from && h < when.from + 6);
+  return make("section", "card when",
+    make("h3", null, when.words),
+    strip("hourly", when.hours, lit, -1, "When they play, hour by hour"),
+    make("p", "ticks", ...[0, 6, 12, 18].map((h) => make("span", null, hourOfDay(h)))),
+    make("p", "note", "Shown in your own time."));
+}
+
+// A member's own bests, each only when there is one.
+function bestsCard(t) {
+  const bests = t.bests || {};
+  const ol = make("ol", "bare");
+  if (bests.buildingDay) {
+    ol.append(make("li", null, make("span", null, "Biggest building day", make("small", null, dayName(bests.buildingDay.day, true))),
+      make("b", null, count(bests.buildingDay.placed) + " blocks")));
+  }
+  if (typeof bests.deepest === "number") ol.append(make("li", null, make("span", null, "Deepest dig"), make("b", null, height(bests.deepest))));
+  if (typeof bests.highest === "number") ol.append(make("li", null, make("span", null, "Highest build"), make("b", null, height(bests.highest))));
+  return ol.children.length ? make("section", "card", make("h3", null, "Own bests"), ol) : null;
+}
+
+// The members someone has built beside, each a way to their page. Nothing when there
+// are none.
+function besideCard(t) {
+  const others = (t.beside || []).map(byId).filter(Boolean).sort(byName);
+  if (!others.length) return null;
+  const faces = make("div", "holders");
+  others.forEach((other) => faces.append(link(home(other), null, figure(other, "head", 28), make("b", null, other.name))));
+  return make("section", "card", make("h3", null, "Has built beside"), faces);
+}
 
 // The member on their own page: bigger, breathing and looking about, waving when
 // the page opens and when they are touched, and turning when they are dragged.
@@ -993,60 +1207,36 @@ function star(p) {
 }
 
 function memberPage(p) {
-  const titles = make("div", "titles");
-  holders().filter((record) => record.best === p).forEach((record) => titles.append(make("span", "title", record.label)));
   const facts = make("p", "facts",
     make("span", playing(p) ? "status on" : "status", playing(p) && dot(), status(p)),
     p.country && make("span", null, flag(p.country), "Joins from " + country(p.country)),
     p.name.startsWith(".") && make("span", null, "Plays on Bedrock"));
   const words = make("div", "words", link("/members", "back", arrow(), "Members"), called("h1", p), facts);
-  const stage = make("div", "stage", star(p), make("i", "shade"), titles.children.length ? titles : null);
+  const stage = make("div", "stage", star(p), make("i", "shade"));
 
-  const tiles = make("div", "tiles");
-  for (const column of COLUMNS.filter((c) => c.tile)) {
-    const place = 1 + players.filter((other) => column.get(other) > column.get(p)).length;
-    const tile = make("div", "card tile", make("small", null, column.tile), make("strong", null, shown(column, p)));
-    if (column.get(p) > 0) tile.append(make("em", place === 1 ? "first" : null, place === 1 ? "Most of anyone" : ordinal(place) + " most"));
-    tiles.append(tile);
+  // Their own numbers, with nothing to say how they compare: time played from the
+  // game, and the rest from the ledger, when it has counted something of theirs.
+  const t = tally(p);
+  const tile = (label, value) => make("div", "card tile", make("small", null, label), make("strong", null, value));
+  const tiles = make("div", t ? "tiles" : "tiles alone", tile("Time played", duration(custom(p, "play_time"))));
+  if (t) {
+    tiles.append(tile("Blocks placed", count(t.placed)), tile("Blocks broken", count(t.broken)),
+      tile("Mobs killed", count(t.mobsKilled)), tile("Villager trades", count(t.trades)));
   }
 
-  const travel = Object.entries(p.stats.custom)
-    .filter(([key]) => key.endsWith("_one_cm"))
-    .map(([key, value]) => { const id = key.slice(0, -7); return [TRAVEL[id] || pretty(id), value]; });
-  const other = [
-    ["Jumps", custom(p, "jump")],
-    ["Player kills", custom(p, "player_kills")],
-    ["Nights slept", custom(p, "sleep_in_bed")],
-    ["Animals bred", custom(p, "animals_bred")],
-    ["Fish caught", custom(p, "fish_caught")],
-    ["Items enchanted", custom(p, "enchant_item")],
-    ["Raids won", custom(p, "raid_win")],
-    ["Chests opened", custom(p, "open_chest")],
-    ["Tools broken", sum(p.stats.broken)],
-  ];
-  const health = [
-    ["Damage dealt", custom(p, "damage_dealt")],
-    ["Damage taken", custom(p, "damage_taken")],
-    ["Blocked by shield", custom(p, "damage_blocked_by_shield")],
-  ];
-  const time = [
-    ["Since last death", custom(p, "time_since_death")],
-    ["Crouching", custom(p, "sneak_time")],
-  ];
+  const when = rhythm(t);
   const lists = make("div", "lists",
-    list("Most mined", named(p.stats.mined)),
-    list("Most crafted", named(p.stats.crafted)),
-    list("Most used", named(p.stats.used)),
-    list("Mobs killed", named(p.stats.killed)),
-    list("Killed by", named(p.stats.killed_by)),
-    list("Travel", travel, km),
-    list("Other", other, count, true),
-    list("Health", health, hearts, true),
-    list("Time", time, duration, true),
+    when && whenCard(when),
+    t && list("Builds with", t.buildsWith.map((e) => [thing(e.name), e.count]),
+      t.kinds ? count(t.kinds) + (t.kinds === 1 ? " kind" : " kinds") + " of block in all" : null),
+    t && list("Mobs killed", t.mobs.map((e) => [creatures(e.name), e.count])),
+    t && list("Gets from villagers", t.gets.map((e) => [thing(e.name), e.count])),
+    t && bestsCard(t),
+    t && besideCard(t),
   );
 
   // On to the members either side, in the order the members page has them.
-  const everyone = [...players].sort((a, b) => (b.seen || 0) - (a.seen || 0));
+  const everyone = [...players].sort(byName);
   const index = everyone.indexOf(p);
   const beside = make("nav", "beside");
   beside.setAttribute("aria-label", "Other members");
@@ -1055,92 +1245,29 @@ function memberPage(p) {
   }
 
   const box = new DocumentFragment();
-  box.append(scene("sub solo", 20 + index, words, acre(3, 80 + index, true, stage)), make("div", "page", staggered(tiles), featsOf(p), staggered(lists), beside));
+  box.append(scene("sub solo", 20 + index, words, acre(3, 80 + index, true, stage)),
+    make("div", "page", staggered(tiles), featsOf(p), lists.children.length ? staggered(lists) : null, beside));
   return box;
 }
 
-// Everyone's numbers, twice: on a narrow screen one number at a time, chosen from
-// a row of buttons, and on a wide one a table that sorts by any column. Choosing
-// draws only this again.
-function numbers(box) {
-  const column = COLUMNS[sort.column];
-  const sorted = [...players].sort((a, b) => {
-    const x = column.get(a), y = column.get(b);
-    const order = x < y ? -1 : x > y ? 1 : a.name.localeCompare(b.name);
-    return sort.down ? -order : order;
-  });
-
-  const choices = make("div", "choices");
-  COLUMNS.forEach((c, index) => {
-    if (!c.tile) return;
-    const button = make("button", null, c.label);
-    button.type = "button";
-    button.setAttribute("aria-pressed", index === sort.column);
-    button.addEventListener("click", () => { sort = { column: index, down: true }; numbers(box); });
-    choices.append(button);
-  });
-  const most = Math.max(1, ...players.map((p) => (column.tile ? column.get(p) : 0)));
-  const ranks = make("ol", "ranks");
-  sorted.forEach((p, index) => {
-    const a = link(home(p), null, make("i", "rank", String(index + 1)), figure(p, "head", 40), make("b", null, p.name), p.country && flag(p.country), make("em", null, shown(column, p)));
-    if (column.tile) a.style.setProperty("--share", (100 * column.get(p) / most).toFixed(1) + "%");
-    ranks.append(make("li", null, a));
-  });
-
-  const head = make("tr", null, make("th"));
-  COLUMNS.forEach((c, index) => {
-    const button = make("button", null, c.label);
-    button.type = "button";
-    button.addEventListener("click", () => {
-      sort = { column: index, down: index === sort.column ? !sort.down : !c.text };
-      numbers(box);
-    });
-    const th = make("th", null, button);
-    th.scope = "col";
-    if (index === sort.column) th.setAttribute("aria-sort", sort.down ? "descending" : "ascending");
-    head.append(th);
-  });
-  const body = make("tbody");
-  sorted.forEach((p, index) => {
-    const tr = make("tr", null, make("td", "rank", String(index + 1)));
-    COLUMNS.forEach((c, i) => {
-      if (i > 0) return tr.append(make("td", i === sort.column ? "chosen" : null, shown(c, p)));
-      const a = link(home(p), null, figure(p, "head", 40), make("b", null, p.name), playing(p) && dot(), p.country && flag(p.country), p.name.startsWith(".") && make("span", "chip", "Bedrock"));
-      tr.append(make("td", "name", a));
-    });
-    body.append(tr);
-  });
-  box.replaceChildren(
-    make("div", "narrow", choices, make("div", "card", ranks)),
-    make("div", "card wide", make("table", null, make("thead", null, head), body)));
-}
-
-function heading(title, small) {
-  return make("h2", null, title, make("small", null, small));
-}
-
-function recordsPage() {
-  const records = make("div", "records");
-  holders().forEach((record, index) => {
-    const yaw = index % 2 ? 14 : -14;
-    const a = link(home(record.best), "card record",
-      plot(300 + index * 17, figure(record.best, "body", 132, stand(yaw, 1, 0.1 + index))),
-      make("span", "title", record.label), called("strong", record.best), make("em", null, record.text));
-    a.dataset.uuid = record.best.uuid;
-    records.append(a);
-  });
-  const all = make("div", "numbers");
-  numbers(all);
-  const words = make("div", "words", make("h1", null, "Records"), make("p", "tally", "Who has been up to what."));
+// Moments to remember on the acres, for all of us together and with no names.
+function momentsPage() {
+  const all = moments();
+  if (!all.length) return quiet("Moments", "No moments to show right now.", link("/", "button", arrow(), "Back to the meadow"));
+  const grid = make("div", "moments");
+  for (const moment of all) {
+    grid.append(make("section", "card moment", drawn(moment.drawing),
+      make("span", null, make("small", null, moment.label), make("strong", null, moment.value), make("em", null, moment.told))));
+  }
+  const words = make("div", "words", make("h1", null, "Moments"), make("p", "tally", "Days and hours to remember on the acres."));
   const box = new DocumentFragment();
-  box.append(scene("sub", 31, words, acre(3, 70, true)), make("div", "page",
-    heading("The noticeboard", "Titles for the taking."), staggered(records),
-    heading("Everyone's numbers", "Pick a number to rank by it, or a member to visit them."), all));
+  box.append(scene("sub", 31, words, acre(3, 70, true)), make("div", "page", staggered(grid),
+    all.some((moment) => moment.hour) && make("p", "aside", "Hours are shown in your own time.")));
   return box;
 }
 
 // A page with nothing on it but a few words: an address that names no page, and
-// the moments before the numbers have come.
+// the page before the numbers have come.
 function quiet(title, text, way) {
   const words = make("div", "words", make("h1", null, title), text && make("p", "tally", text), way);
   const box = new DocumentFragment();
@@ -1161,7 +1288,8 @@ function route(path) {
     const member = players.find((p) => p.name.toLowerCase() === wanted || p.uuid === wanted);
     return member ? { page: "members", member } : { page: "lost" };
   }
-  if (parts[0] === "records" && parts.length === 1) return { page: "records" };
+  // The moments were the records once, and an old link to those still finds them.
+  if ((parts[0] === "moments" || parts[0] === "records") && parts.length === 1) return { page: "moments" };
   if (parts[0] === "feats" && parts.length === 1) return { page: "feats" };
   return { page: "lost" };
 }
@@ -1178,18 +1306,20 @@ function draw(arriving) {
     return;
   }
   current = route(location.pathname);
-  const pages = { home: homePage, members: membersPage, records: recordsPage, feats: featsPage, lost: lostPage };
+  // An old address shows the page's own in the address bar, to be shared from there.
+  if (current.page === "moments" && location.pathname !== "/moments") history.replaceState(history.state, "", "/moments");
+  const pages = { home: homePage, members: membersPage, moments: momentsPage, feats: featsPage, lost: lostPage };
   view.replaceChildren(current.member ? memberPage(current.member) : pages[current.page]());
   for (const a of document.querySelectorAll("#nav a")) {
     if (a.dataset.page === current.page) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
   }
-  const names = { home: "", members: "Members", records: "Records", feats: "Feats", lost: "Nothing here" };
+  const names = { home: "", members: "Members", moments: "Moments", feats: "Feats", lost: "Nothing here" };
   const name = current.member ? current.member.name : names[current.page];
   document.title = name ? name + " · Lush Acres" : "Lush Acres";
 }
 
 // Where a page is among the others, to tell which way to move between two.
-const place = (where) => ({ home: 0, members: 1, records: 2, feats: 3, lost: 4 })[where.page] + (where.member ? 0.5 : 0);
+const place = (where) => ({ home: 0, members: 1, moments: 2, feats: 3, lost: 4 })[where.page] + (where.member ? 0.5 : 0);
 
 // Moves to the page the address now names, with a transition where the browser
 // has them: the sky stays, the page slides the way it lies from the last one,
@@ -1268,12 +1398,29 @@ async function loadFeats() {
   }
 }
 
+// What the ledger counts comes the same way, and the hub does without it too.
+async function loadCounted() {
+  try {
+    const response = await fetch("/data/counted.json", { cache: "no-store" });
+    if (!response.ok) throw new Error(response.status);
+    const data = await response.json();
+    // The script checks every part, and this is all the page relies on being there.
+    const lists = [data.members, data.days, data.whatGetsUs, data.builtFrom && data.builtFrom.most];
+    if (typeof data.placed !== "number" || typeof data.broken !== "number" || !lists.every(Array.isArray)) throw new Error("not counted");
+    if (!data.members.every((t) => ["mobs", "gets", "buildsWith", "beside"].every((key) => Array.isArray(t[key])))) throw new Error("not counted");
+    tallies = new Map(data.members.map((member) => [member.uuid, member]));
+    counted = data;
+  } catch (error) {
+    // Nothing to do.
+  }
+}
+
 async function load() {
   try {
     const response = await fetch("/data/stats.json", { cache: "no-store" });
     if (!response.ok) throw new Error(response.status);
     const data = await response.json();
-    await loadFeats();
+    await Promise.all([loadFeats(), loadCounted()]);
     // Someone who joined and left at once has a file with no play time in it.
     const found = data.players
       .map((p) => ({ ...p, name: p.name || p.uuid.slice(0, 8), country: /^[A-Z]{2}$/.test(p.country || "") ? p.country : null }))

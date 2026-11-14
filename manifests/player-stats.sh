@@ -13,8 +13,9 @@
 # and the database stay in $state, which Caddy does not serve. Only the country
 # reaches the page.
 #
-# And it asks the ledger for the feats members have earned, and writes them beside
-# the numbers.
+# And it asks the ledger for the feats members have earned and for what it has
+# counted from the server's log, such as blocks placed and broken, and writes both
+# beside the numbers.
 #
 # The server's folder is mounted read-only. This must keep running whatever is in
 # it, and whatever Mojang, DB-IP or the ledger answer. A container that stops makes
@@ -30,7 +31,9 @@ fetch=${FETCH:-1}
 skins=$(dirname "$out")/skins
 flags=$(dirname "$out")/flags
 feats=$(dirname "$out")/feats.json
-# Where the ledger answers, without a slash at the end. Empty leaves the feats out.
+counted=$(dirname "$out")/counted.json
+# Where the ledger answers, without a slash at the end. Empty leaves the feats and
+# what the ledger counts out.
 ledger=${LEDGER_URL:-}
 ledger=${ledger%/}
 
@@ -200,6 +203,67 @@ update_feats() {
   feats_log=$line
 }
 
+# Asks the ledger what it has counted from the server's log, for the whole server and
+# for each member: blocks placed and broken, what everything is built from, what gets
+# us, every day, a few moments, and each member's mobs, trades, hours and own bests.
+# Only the parts the hub shows are copied, each checked to be what it should be, so
+# nothing else the ledger may know, such as where something happened, can reach the
+# page. An answer that is not what the hub expects counts as no answer: the page
+# keeps what it has, and with no address set there is nothing.
+counted_log=
+update_counted() {
+  [ -n "$ledger" ] || return 0
+  if curl -fsS --max-time 10 --max-filesize 5000000 -o "$state/counted.tmp" "$ledger/stats" 2>/dev/null &&
+      jq -c --argjson now "$(date +%s)" '
+        def seconds: sub("\\.[0-9]+"; "") | sub("\\+00:00$"; "Z") | fromdateiso8601;
+        def number: if type == "number" then . else error("not a number") end;
+        def text: if type == "string" then . else error("not text") end;
+        def day: text | if test("^[0-9]{4}-[0-9]{2}-[0-9]{2}$") then . else error("not a day") end;
+        def maybe(f): if . == null then null else f end;
+        # A list may be left out when it is empty.
+        def many(f): (. // []) | if type == "array" then map(f) else error("not a list") end;
+        def counts: many({name: (.name | text), count: (.count | number)});
+        {
+          updated: $now,
+          placed: (.placed | number),
+          broken: (.broken | number),
+          builtFrom: {kinds: (.builtFrom.kinds | number), most: (.builtFrom.most | counts)},
+          whatGetsUs: (.whatGetsUs | counts),
+          days: (.days | many({day: (.day | day), placed: (.placed | number), broken: (.broken | number), members: (.members | number)})),
+          moments: {
+            biggestDay: (.moments.biggestDay | maybe({day: (.day | day), blocks: (.blocks | number)})),
+            busiestHour: (.moments.busiestHour | maybe({at: (.at | text | seconds), blocks: (.blocks | number)})),
+            fullestHour: (.moments.fullestHour | maybe({at: (.at | text | seconds), members: (.members | number)}))
+          },
+          members: (.members | many({
+            uuid: (.playerId | text),
+            placed: (.placed | number),
+            broken: (.broken | number),
+            mobsKilled: (.mobsKilled | number),
+            mobs: (.mobs | counts),
+            trades: (.trades | number),
+            gets: (.gets | counts),
+            kinds: (.kinds | number),
+            buildsWith: (.buildsWith | counts),
+            hours: (.hours | if type == "array" and length == 24 then map(number) else error("not 24 hours") end),
+            beside: (.beside | many(text)),
+            bests: {
+              buildingDay: (.bests.buildingDay | maybe({day: (.day | day), placed: (.placed | number)})),
+              deepest: (.bests.deepest | maybe(number)),
+              highest: (.bests.highest | maybe(number))
+            }
+          }))
+        }' "$state/counted.tmp" > "$counted.tmp" 2>/dev/null &&
+      [ -s "$counted.tmp" ] && mv "$counted.tmp" "$counted"; then
+    line="What the ledger counts is up to date."
+  else
+    line="Could not ask the ledger what it counts, so the page keeps what it has."
+  fi
+  rm -f "$counted.tmp" "$state/counted.tmp"
+  [ "$line" = "$counted_log" ] || echo "$line"
+  counted_log=$line
+}
+
 # Names by UUID, kept from the last round that could read them.
 names='{}'
 
@@ -294,6 +358,7 @@ trap 'kill $! 2>/dev/null; exit 0' TERM INT
 while :; do
   build
   update_feats
+  update_counted
   [ -z "${ONCE:-}" ] || exit 0
   sleep "$interval" &
   wait $!

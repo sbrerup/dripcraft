@@ -694,22 +694,30 @@ map, anyone who knows the server's address can see it, countries included.
 - **Home** (`/`) has everyone standing together on the meadow, each in their own skin, with
   their name, the flag of the country they last joined from and a green dot while they
   are playing. Someone who is playing waves. Below are who was here last, a few of the
-  records, the feats earned lately, and doors to the other pages.
-- **Members** (`/members`) has a card for each member, and `/members/NAME` is a member's
-  own page. The member stands at the top, waves when the page opens or when touched, and
-  turns when dragged. Below are time played, deaths, mobs killed, blocks mined, distance
-  travelled, items crafted and trades with villagers, each with their place among the
-  others, then the feats they hold, then what they mined, crafted, used and killed most,
-  what killed them, and how they travelled, and at the foot links to the members either
-  side.
-- **Records** (`/records`) has the noticeboard of titles, such as Homebody for the most
-  time played, and everyone's numbers: on a wide screen a table that sorts by any column,
-  and on a phone a ranking by one number at a time.
+  moments on the noticeboard, the feats earned lately, then what all of us have done
+  together: the road to the first million blocks placed and broken, the server's days as
+  a strip of bars (the latest four weeks, with the biggest day marked), what Lush Acres is
+  built from, and what gets us, and last doors to the other pages.
+- **Members** (`/members`) has a card for each member, in the order of their names, with
+  whether they are playing or when they last played and one line about them: the part of
+  the day they are mostly about, in the visitor's own time. `/members/NAME` is a member's
+  own page. The member stands at the
+  top, waves when the page opens or when touched, and turns when dragged. Below are time
+  played, blocks placed and broken, mobs killed and villager trades, then the feats they
+  hold, then when they mostly play (in the visitor's own time), what they build with,
+  which mobs they have killed, what they get from villagers, their own bests, and the
+  members they have built beside, and at the foot links to the members either side.
+- **Moments** (`/moments`) has the server's biggest day, its busiest hour, the hour with
+  most of us at work, and the deepest dig and highest build anyone has made, without
+  names. `/records`, where this page used to be, opens it too.
 - **Feats** (`/feats`) has every feat there is, how it is earned, and the members who hold
   it, whoever earned it first in front. A feat is something earned by what a member did,
   alone or with others, such as building in the same spot in the same hour. Nothing is
   given in the game for one, and none of them ranks members against each other.
 - **Map** goes to the [web map](#web-map) at `/map/`.
+
+Nothing on the hub ranks members against each other, and deaths are counted only for the
+whole server, never for one member.
 
 Moving between pages keeps the sky where it is while the land changes under it, slides
 the page the way it lies from the last one, and lets a member's figure walk from where it
@@ -744,14 +752,15 @@ fontTools (`varLib.instancer`, then `subset` to WOFF2), which keeps the copyrigh
 licence notices inside the files.
 
 Everything the hub serves is in the `player-stats` ConfigMap, which may hold 1 MiB. It is
-about 175 kB now. The fonts count for a third more than their size, because a ConfigMap
+about 185 kB now. The fonts count for a third more than their size, because a ConfigMap
 keeps files that are not text as base64.
 
-The game counts all of this itself, in one file per player under `players/stats` in the
-world folder, so the server needs no plugin and the numbers go back to the world's first
-day. The creative server is left out. The game saves a player's file when it saves the
-world and when they leave, so the numbers for someone who is playing are a few minutes
-old. "Last played" is when their file was last saved.
+Time played comes from the game itself, which counts it in one file per player under
+`players/stats` in the world folder, so it goes back to the world's first day. The
+creative server is left out. The game saves a player's file when it saves the world and
+when they leave, so the time for someone who is playing is a few minutes old. "Last
+played" is when their file was last saved. Everything else on the hub comes from the
+ledger (below).
 
 The `player-stats` container beside Caddy in the `web-map` pod runs
 `manifests/player-stats.sh`. Every five minutes it gathers the files into one, with names
@@ -760,15 +769,29 @@ Only that container mounts the server's folder, read-only,
 so Caddy never sees it, and changing the hub or the script restarts the proxy and not the
 server.
 
-The feats are not the game's. The ledger works them out from what the [archive](#the-archive)
-has recorded, since 6 November 2026, and keeps them. In the same round the container asks
-the ledger which feats there are and who holds them (`LEDGER_URL` in `web-map.yaml`), and
-writes `/data/feats.json` beside the numbers: each member's feats, when each was earned
-and with whom. The ledger also says in which part of the map, and the script leaves that
-out, so it never reaches the page. Network policy lets the `web-map` pod reach the ledger's
-pod on one port, and the ledger lets in that pod and nothing else, so a visitor's browser
-never reaches the ledger. The hub does without it: when the ledger does not answer, the
-page keeps the feats it has, and a pod that has just started shows none until it does.
+The feats and the other numbers are not the game's. The ledger works them out from what
+the [archive](#the-archive) has recorded, since 6 November 2026, and keeps them. In the
+same round the container asks the ledger (`LEDGER_URL` in `web-map.yaml`) two things and
+writes the answers beside the game's numbers:
+
+- **`/data/feats.json`**: which feats there are and who holds them, when each was earned
+  and with whom. The ledger also says in which part of the map, and the script leaves that
+  out.
+- **`/data/counted.json`**, from the ledger's `/stats`: blocks placed and broken, what
+  everything is built from, what gets us, every day since recording began, the moments,
+  and for each member blocks placed and broken, mobs killed and which, villager trades
+  and what for, the blocks they build with, what they did in each hour of the day (in
+  UTC), whom they have built beside, and their own bests. The script copies only these,
+  each checked to be the kind of value it should be, with `uuid` for the ledger's
+  `playerId` and the moments' hours as seconds. Anything else in the answer, such as where
+  something happened, never reaches the page, and an answer that is not what the hub
+  expects is treated as no answer.
+
+Network policy lets the `web-map` pod reach the ledger's pod on one port, and the ledger
+lets in that pod and nothing else, so a visitor's browser never reaches the ledger. The hub
+does without it: when the ledger does not answer, the page keeps what it has, and a pod
+that has just started shows only time played, when members last played, and the members
+themselves until it does.
 
 The hub loads nothing from other sites, so a visitor's browser tells nobody else what it
 is looking at. The container fetches what it needs and Caddy serves the copies:
@@ -928,7 +951,8 @@ fail if the two differ, so change both files in one commit. Both servers then re
 python -m unittest discover -s tests
 ```
 
-The tests need PyYAML and `kubectl`. The one that runs `manifests/player-stats.sh` also
-needs `sh` and `jq`, and is skipped without them. The ones that run `manifests/archive.py`
+The tests need PyYAML and `kubectl`. The ones that run `manifests/player-stats.sh` also
+need `sh` and `jq`, and those that ask a stand-in for the ledger `curl` as well. They are
+skipped without them. The ones that run `manifests/archive.py`
 need nothing more than Python. One of them starts it for a few seconds and asks its feed on
 a port of the machine the tests run on.

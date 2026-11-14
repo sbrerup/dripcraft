@@ -477,9 +477,10 @@ class DripcraftPublicTests(unittest.TestCase):
             "podSelector": {"matchLabels": {"app.kubernetes.io/name": "dripcraft-ledger"}},
         }])
         self.assertEqual(rule["ports"], [{"protocol": "TCP", "port": 8080}])
-        # The page reads the copy the script wrote, like the numbers.
+        # The page reads the copies the script wrote, like the numbers.
         script = (ROOT / "manifests" / "hub.js").read_text(encoding="utf-8")
         self.assertIn('fetch("/data/feats.json"', script)
+        self.assertIn('fetch("/data/counted.json"', script)
 
     @unittest.skipUnless(shutil.which("sh") and shutil.which("jq") and shutil.which("curl"), "needs sh, jq and curl")
     def test_stats_script_writes_the_feats_without_where_they_were_earned(self):
@@ -567,6 +568,140 @@ class DripcraftPublicTests(unittest.TestCase):
             result = run("http://127.0.0.1:9")
             self.assertEqual(result.returncode, 0)
             self.assertEqual(json.loads(out.read_text()), data)
+
+    @unittest.skipUnless(shutil.which("sh") and shutil.which("jq") and shutil.which("curl"), "needs sh, jq and curl")
+    def test_stats_script_writes_what_the_ledger_counts_without_places(self):
+        member = {
+            "playerId": "aaaa", "placed": 31866, "broken": 108505,
+            "mobsKilled": 1985, "mobs": [{"name": "skeleton", "count": 501}],
+            "trades": 8665, "gets": [{"name": "minecraft:emerald", "count": 6779}],
+            "kinds": 188, "buildsWith": [{"name": "minecraft:spruce_planks", "count": 2024}],
+            "hours": [0] * 18 + [5, 9, 2, 0, 0, 0],
+            "beside": ["bbbb"],
+            "bests": {"buildingDay": {"day": "2026-11-08", "placed": 12034}, "deepest": -61, "highest": 199},
+        }
+        answer = {
+            "placed": 118258, "broken": 288426,
+            "builtFrom": {"kinds": 408, "most": [{"name": "minecraft:nether_wart_block", "count": 11071}]},
+            "whatGetsUs": [{"name": "vindicator", "count": 65}, {"name": "fire tick", "count": 3}],
+            "days": [{"day": "2026-11-06", "placed": 5020, "broken": 15585, "members": 7}],
+            "moments": {
+                "biggestDay": {"day": "2026-11-13", "blocks": 100101},
+                "busiestHour": {"at": "2026-11-13T11:00:00+00:00", "blocks": 21232},
+                "fullestHour": None,
+            },
+            "members": [
+                member,
+                {**member, "playerId": "bbbb", "mobs": [], "beside": [],
+                 "bests": {"buildingDay": None, "deepest": None, "highest": None}},
+            ],
+        }
+        answers = {"/stats": answer}
+
+        class Ledger(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                if self.path not in answers:
+                    self.send_error(404)
+                    return
+                body = answers[self.path] if isinstance(answers[self.path], bytes) else json.dumps(answers[self.path]).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        ledger = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Ledger)
+        threading.Thread(target=ledger.serve_forever, daemon=True).start()
+        self.addCleanup(ledger.server_close)
+        self.addCleanup(ledger.shutdown)
+        address = f"http://127.0.0.1:{ledger.server_address[1]}"
+        with tempfile.TemporaryDirectory() as folder:
+            server = pathlib.Path(folder)
+            (server / "state").mkdir()
+            (server / "public").mkdir()
+            out = server / "public" / "counted.json"
+
+            def run(address):
+                return subprocess.run(
+                    ["sh", (ROOT / "manifests" / "player-stats.sh").as_posix()],
+                    env={
+                        **os.environ, "ONCE": "1", "FETCH": "0", "SERVER_DIR": server.as_posix(),
+                        "OUT_FILE": (server / "public" / "stats.json").as_posix(), "STATE_DIR": (server / "state").as_posix(),
+                        "LEDGER_URL": address,
+                    },
+                    capture_output=True, text=True, timeout=60,
+                )
+
+            # With no address there is nothing, and nothing is said about it.
+            result = run("")
+            self.assertEqual(result.returncode, 0)
+            self.assertFalse(out.exists())
+            self.assertNotIn("ledger", result.stdout)
+
+            result = run(address + "/")
+            self.assertEqual(result.returncode, 0)
+            self.assertIn("What the ledger counts is up to date.", result.stdout)
+            data = json.loads(out.read_text())
+            self.assertIsInstance(data.pop("updated"), int)
+            # The answer as it came, with the member's id called uuid as in the other
+            # files, and the hours as seconds: 2026-11-13 11:00 in UTC.
+            self.assertEqual(data["moments"], {
+                "biggestDay": {"day": "2026-11-13", "blocks": 100101},
+                "busiestHour": {"at": 1794567600, "blocks": 21232},
+                "fullestHour": None,
+            })
+            expected = {**answer, "members": [
+                {"uuid": m["playerId"], **{k: v for k, v in m.items() if k != "playerId"}} for m in answer["members"]
+            ]}
+            del expected["moments"], data["moments"]
+            self.assertEqual(data, expected)
+            self.assertEqual(sorted(file.name for file in (server / "state").iterdir()), [])
+
+            # Should the ledger ever say where something happened, the page never hears
+            # of it: no coordinates and no world, wherever they are put.
+            answers["/stats"] = {
+                **answer, "world": "dripcraft",
+                "moments": {**answer["moments"], "busiestHour": {**answer["moments"]["busiestHour"], "x": 120, "z": -40, "world": "dripcraft"}},
+                "days": [{**answer["days"][0], "where": "dripcraft/-2/0"}],
+                "members": [{**member, "x": 1, "z": 2, "bests": {**member["bests"], "deepestAt": {"world": "dripcraft", "x": 5, "z": 6}}}],
+            }
+            result = run(address)
+            self.assertEqual(result.returncode, 0)
+            text = out.read_text()
+            self.assertNotIn("dripcraft", text)
+
+            def keys(value):
+                if isinstance(value, dict):
+                    return set(value) | set().union(*map(keys, value.values()))
+                if isinstance(value, list):
+                    return set().union(*map(keys, value))
+                return set()
+
+            self.assertEqual(keys(json.loads(text)) & {"x", "y", "z", "world", "where", "deepestAt", "playerId"}, set())
+            data = json.loads(text)
+
+            # When the ledger does not answer, or answers with something else, the page
+            # keeps what it has, and the script still ends well.
+            for nonsense in (
+                {"status": 500}, b"not json", [], {**answer, "placed": "lots"},
+                {**answer, "members": [{**member, "hours": [1, 2, 3]}]},
+                {**answer, "moments": {**answer["moments"], "busiestHour": {"at": "yesterday", "blocks": 1}}},
+            ):
+                answers["/stats"] = nonsense
+                result = run(address)
+                self.assertEqual(result.returncode, 0)
+                self.assertIn("keeps what it has", result.stdout)
+                self.assertEqual(json.loads(out.read_text()), data)
+            del answers["/stats"]
+            self.assertEqual(run(address).returncode, 0)
+            self.assertEqual(json.loads(out.read_text()), data)
+            result = run("http://127.0.0.1:9")
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual(json.loads(out.read_text()), data)
+            self.assertEqual(sorted(file.name for file in (server / "state").iterdir()), [])
 
     def archive_container(self):
         (container,) = self.archive["containers"]

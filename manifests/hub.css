@@ -27,6 +27,7 @@
   --on-accent: #ffffff;
   --gold: #8a5d08;
   --gold-soft: #fbecb6;
+  --gold-bar: #e0a82a;
   --live: #1fae48;
   --glass: rgba(255, 254, 248, 0.86);
   --shadow: 0 1px 2px rgba(30, 50, 30, 0.06), 0 10px 28px -12px rgba(30, 50, 30, 0.22);
@@ -84,6 +85,7 @@
     --on-accent: #0c1611;
     --gold: #f1c75b;
     --gold-soft: rgba(241, 199, 91, 0.15);
+    --gold-bar: #f1c75b;
     --live: #4fdd72;
     --glass: rgba(18, 30, 23, 0.88);
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 12px 30px -12px rgba(0, 0, 0, 0.7);
@@ -145,7 +147,8 @@ img.flag { width: 18px; height: auto; border-radius: 3px; box-shadow: 0 0 0 1px 
 .arrow { display: inline-block; width: 0.5em; height: 0.5em; border: solid currentColor; border-width: 2px 2px 0 0; transform: rotate(45deg); flex: none; transition: translate 0.2s; }
 .back .arrow, .before .arrow, .button .arrow { transform: rotate(-135deg); }
 .chip { display: inline-block; padding: 1px 8px; border-radius: 999px; background: var(--inset); color: var(--soft); font-size: 0.6875rem; font-weight: 700; }
-.title { display: inline-block; padding: 2px 10px; border-radius: 999px; background: var(--gold-soft); color: var(--gold); font-size: 0.75rem; font-weight: 800; letter-spacing: 0.02em; white-space: nowrap; }
+/* A small drawing on a soft gold square, for a feat or a moment. */
+.mark, .feat > svg, .featcard h3 svg { width: 40px; height: 40px; padding: 9px; border-radius: 13px; background: var(--gold-soft); color: var(--gold); fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
 .shade { display: block; width: 44px; height: 12px; margin-top: -11px; border-radius: 50%; background: radial-gradient(closest-side, rgba(8, 30, 12, 0.42), transparent); }
 
 /* The name and the pages float over the view: along the top on a wide screen,
@@ -311,8 +314,6 @@ h1.name { --size: clamp(2.5rem, 9.5vw, 4rem); --room: min(100vw - 44px, 900px); 
 .star { height: var(--tall); width: auto; cursor: grab; touch-action: pan-y; view-transition-name: figure; }
 .star:active { cursor: grabbing; }
 .stage .shade { width: 96px; height: 22px; margin-top: -19px; }
-.titles { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 12px; }
-.titles .title { padding: 4px 13px; font-size: 0.8125rem; box-shadow: var(--shadow); background: #fbecb6; color: #6f4a04; }
 @media (max-width: 559px) {
   .solo .acre { --tall: 236px; }
   .solo .words { padding-bottom: 26px; }
@@ -336,9 +337,38 @@ a.card.before:hover .arrow { translate: -3px 0; }
 .still .rise > * { animation: none; }
 
 /* Home: what is going on, and the doors to the other pages. */
-.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 16px; }
-.two .card { padding: 20px 20px 16px; }
-.two h2 { margin-bottom: 8px; font-size: 1.375rem; }
+.two, .together { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 16px; }
+.two .card, .together .card { padding: 20px 20px 16px; }
+.two h2, .together h2 { margin-bottom: 8px; font-size: 1.375rem; }
+.together { margin-top: 16px; }
+.together .road, .together .days { grid-column: 1 / -1; }
+@media (min-width: 720px) {
+  .together { grid-template-columns: 1fr 1fr; }
+}
+.people .mark { width: 36px; height: 36px; padding: 8px; border-radius: 11px; }
+/* A line under a heading that says what a panel shows. */
+.note { margin: -4px 0 12px; font-size: 0.875rem; color: var(--soft); text-wrap: pretty; }
+/* The road to the first million: how far, and a bar notched every hundred
+   thousand, like the bar of experience in the game. */
+.sofar { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; margin: 0 0 12px; }
+.sofar strong { font: 650 2rem/1.15 var(--display); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.sofar span { font-size: 0.9375rem; color: var(--soft); }
+.track { position: relative; height: 16px; overflow: hidden; border-radius: 5px; background: var(--inset); box-shadow: inset 0 0 0 1px var(--line); }
+.track i { display: block; height: 100%; min-width: 4px; background: linear-gradient(color-mix(in srgb, var(--accent), #fff 22%), var(--accent)); }
+.track.reached i { background: linear-gradient(color-mix(in srgb, var(--gold-bar), #fff 25%), var(--gold-bar)); }
+.track::after { content: ""; position: absolute; inset: 0; background: repeating-linear-gradient(90deg, transparent 0 calc(10% - 2px), var(--card) calc(10% - 2px) 10%); }
+.ends { display: flex; justify-content: space-between; gap: 12px; margin-top: 7px; font-size: 0.8125rem; font-weight: 700; color: var(--faint); font-variant-numeric: tabular-nums; }
+.ends .done { color: var(--gold); }
+/* Bars standing side by side: the server's days, and a member's hours. */
+.strip { display: flex; align-items: flex-end; gap: 3px; height: 84px; padding-top: 4px; }
+.strip i { flex: 1; min-width: 0; min-height: 2px; border-radius: 3px 3px 1px 1px; background: color-mix(in srgb, var(--accent) 28%, transparent); }
+.strip i.lit { background: var(--accent); }
+.strip i.gold { background: var(--gold-bar); }
+.strip.hourly { height: 60px; gap: 2px; }
+.key { display: flex; align-items: flex-start; gap: 8px; margin-top: 10px; font-size: 0.875rem; color: var(--soft); text-wrap: pretty; }
+.key i { width: 10px; height: 10px; margin-top: 0.36em; border-radius: 3px; background: var(--gold-bar); flex: none; }
+.ticks { display: grid; grid-template-columns: repeat(4, 1fr); margin-top: 6px; font-size: 0.75rem; font-weight: 700; color: var(--faint); font-variant-numeric: tabular-nums; }
+.when .note { margin: 10px 0 0; font-size: 0.8125rem; color: var(--faint); }
 .people a { display: flex; align-items: center; gap: 12px; margin: 0 -10px; padding: 6px 10px; border-radius: 12px; color: inherit; text-decoration: none; transition: background 0.15s; }
 .people a:hover { background: var(--inset); }
 .people span { min-width: 0; line-height: 1.3; }
@@ -355,10 +385,9 @@ a.card.before:hover .arrow { translate: -3px 0; }
 .door small { display: block; font-size: 0.875rem; color: var(--soft); }
 .door .arrow { color: var(--faint); }
 
-/* Members and records: a panel each, with the member standing in a small view of
-   their own. */
-.members, .records { display: grid; grid-template-columns: repeat(auto-fill, minmax(152px, 1fr)); gap: 14px; }
-.member, .record { container-type: inline-size; display: flex !important; flex-direction: column; align-items: center; gap: 2px; padding: 0 10px 16px; overflow: hidden; text-align: center; }
+/* Members: a panel each, with the member standing in a small view of their own. */
+.members { display: grid; grid-template-columns: repeat(auto-fill, minmax(152px, 1fr)); gap: 14px; }
+.member { container-type: inline-size; display: flex !important; flex-direction: column; align-items: center; gap: 2px; padding: 0 10px 16px; overflow: hidden; text-align: center; }
 .plot {
   --acre-cap: color-mix(in srgb, var(--acre-1), var(--sky-3) 24%);
   position: relative; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; align-self: stretch; height: 168px; margin: 0 -10px 12px; padding-bottom: 11px;
@@ -368,41 +397,49 @@ a.card.before:hover .arrow { translate: -3px 0; }
 .plot canvas, .plot .shade { position: relative; }
 .plot canvas { height: 132px; width: auto; transition: transform 0.3s cubic-bezier(0.3, 1.7, 0.5, 1); }
 a.card:hover .plot canvas { transform: translateY(-5px); }
-.member strong, .record strong { --size: 1.1875rem; --room: 100cqi - 26px; display: flex; align-items: center; justify-content: center; gap: 7px; max-width: 100%; font-family: var(--display); font-weight: 650; line-height: 1.5rem; letter-spacing: -0.01em; white-space: nowrap; }
-.record strong { --room: 100cqi; }
+.member strong { --size: 1.1875rem; --room: 100cqi - 26px; display: flex; align-items: center; justify-content: center; gap: 7px; max-width: 100%; font-family: var(--display); font-weight: 650; line-height: 1.5rem; letter-spacing: -0.01em; white-space: nowrap; }
 .member .status { display: flex; align-items: center; gap: 7px; font-size: 0.875rem; font-weight: 700; color: var(--soft); }
-.member small, .record em { font-size: 0.8125rem; font-style: normal; color: var(--faint); font-variant-numeric: tabular-nums; }
-.record .title { margin-bottom: 4px; }
-.record em { color: var(--soft); font-size: 0.875rem; }
+.member small { margin-top: 4px; font-size: 0.8125rem; line-height: 1.35; color: var(--faint); text-wrap: balance; }
 @media (min-width: 720px) {
   .members { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 18px; }
-  .records { grid-template-columns: repeat(auto-fit, minmax(168px, 1fr)); gap: 16px; }
 }
 
-/* One member's page: the big numbers, then what they did most. */
+/* Moments: a panel each, with a drawing, what it was and when. */
+.moments { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+.moment { display: flex; align-items: flex-start; gap: 14px; padding: 16px 18px 15px 16px; }
+.moment span { display: flex; flex-direction: column; min-width: 0; }
+.moment small { font-size: 0.8125rem; font-weight: 800; color: var(--gold); }
+.moment strong { font: 650 1.75rem/1.2 var(--display); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.moment em { font-size: 0.9375rem; font-style: normal; color: var(--soft); text-wrap: pretty; }
+.aside { margin: 16px 4px 0; font-size: 0.8125rem; color: var(--faint); text-align: center; }
+@media (min-width: 720px) {
+  .moments { gap: 16px; }
+}
+
+/* One member's page: their own numbers, then what they did most. */
 .tiles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
 .tile { padding: 14px 16px 13px; }
 .tile:first-child { grid-column: span 2; }
 .tile small { display: block; font-size: 0.8125rem; font-weight: 700; color: var(--soft); }
-.tile strong { display: block; font: 650 1.625rem/1.25 var(--display); letter-spacing: -0.02em; }
+.tile strong { display: block; font: 650 1.625rem/1.25 var(--display); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
 .tile:first-child strong { font-size: 2.25rem; }
-.tile em { font-size: 0.8125rem; font-style: normal; font-weight: 700; color: var(--faint); }
-.tile em.first { color: var(--gold); }
 .lists { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin-top: 14px; }
 .lists .card { padding: 16px 16px 14px; }
 .lists h3 { margin: 0 4px 10px; font-size: 1.1875rem; }
-.lists li { position: relative; display: flex; justify-content: space-between; gap: 12px; padding: 4px 9px; margin-bottom: 3px; font-size: 0.9375rem; font-variant-numeric: tabular-nums; }
-.lists li::before { content: ""; position: absolute; inset: 0 auto 0 0; width: var(--share, 0); min-width: 6px; border-radius: 7px; background: var(--accent-soft); }
-.lists .bare li::before { content: none; }
-.lists .bare li { border-top: 1px solid var(--line); margin: 0; padding: 6px 4px; }
-.lists .bare li:first-child { border-top: 0; }
-.lists li span, .lists li b { position: relative; }
-.lists li b { font-weight: 700; white-space: nowrap; }
-.lists p { margin: 0 4px; color: var(--faint); font-size: 0.9375rem; }
+.lists .note, .lists .strip, .lists .ticks { margin-left: 4px; margin-right: 4px; }
+/* A list of things and how many, each with a bar measured against the first. */
+.bars li { position: relative; display: flex; justify-content: space-between; gap: 12px; padding: 4px 9px; margin-bottom: 3px; font-size: 0.9375rem; font-variant-numeric: tabular-nums; }
+.bars li::before { content: ""; position: absolute; inset: 0 auto 0 0; width: var(--share, 0); min-width: 6px; border-radius: 7px; background: var(--accent-soft); }
+.bars li span, .bars li b { position: relative; min-width: 0; }
+.bars li b { font-weight: 700; white-space: nowrap; }
+.bare li { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; border-top: 1px solid var(--line); padding: 7px 4px; font-size: 0.9375rem; font-variant-numeric: tabular-nums; }
+.bare li:first-child { border-top: 0; }
+.bare li small { display: block; font-size: 0.8125rem; color: var(--faint); }
+.bare li b { font-weight: 700; white-space: nowrap; }
+.lists .holders { margin: 2px 2px 4px; }
 /* Feats: what a member holds, on their own page, and every feat on a page of its own. */
 .feats { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; margin-top: 14px; }
 .feat { display: flex; align-items: flex-start; gap: 13px; padding: 14px 16px 13px 14px; }
-.feat > svg, .featcard h3 svg { width: 40px; height: 40px; padding: 9px; border-radius: 13px; background: var(--gold-soft); color: var(--gold); fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
 .feat > span { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .feat strong { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; font: 650 1.1875rem/1.3 var(--display); letter-spacing: -0.01em; }
 .feat em { font-size: 0.875rem; font-style: normal; color: var(--soft); }
@@ -430,50 +467,13 @@ a.card:hover .plot canvas { transform: translateY(-5px); }
 .beside b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .beside .arrow { color: var(--faint); }
 @media (min-width: 720px) {
-  .tiles { grid-template-columns: repeat(4, 1fr); gap: 14px; }
+  /* Time played and the four numbers from the ledger in one row. */
+  .tiles { grid-template-columns: 1.4fr repeat(4, 1fr); gap: 14px; }
+  .tile:first-child { grid-column: auto; }
 }
-
-/* Records: everyone's numbers. A narrow screen ranks by one number at a time,
-   and a wide one has the whole table. */
-.wide { display: none; overflow-x: auto; }
-.choices { display: flex; gap: 8px; margin: 0 -16px 12px; padding: 2px 16px; overflow-x: auto; scrollbar-width: none; }
-.choices::-webkit-scrollbar { display: none; }
-.choices button {
-  all: unset; box-sizing: border-box; padding: 7px 15px; border: 1px solid var(--line); border-radius: 999px; background: var(--card); color: var(--soft);
-  font-size: 0.875rem; font-weight: 700; white-space: nowrap; cursor: pointer; transition: background 0.15s, color 0.15s;
-}
-.choices button[aria-pressed="true"] { background: var(--accent); border-color: transparent; color: var(--on-accent); }
-.choices button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
-.ranks { padding: 6px; }
-.ranks a { position: relative; display: flex; align-items: center; gap: 11px; padding: 8px 10px 11px; border-radius: 14px; color: inherit; text-decoration: none; }
-.ranks a::before, .ranks a::after { content: ""; position: absolute; left: 86px; right: 10px; bottom: 5px; height: 4px; border-radius: 2px; background: var(--inset); }
-.ranks a::after { right: auto; width: calc((100% - 96px) * var(--share, 0%) / 100%); background: var(--accent); }
-.ranks a:not([style])::before, .ranks a:not([style])::after { content: none; }
-.rank { width: 1.25rem; font-style: normal; font-weight: 700; text-align: center; color: var(--faint); font-variant-numeric: tabular-nums; }
-.ranks li:first-child .rank { color: var(--gold); }
-.ranks b { min-width: 0; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ranks em { margin-left: auto; font-style: normal; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
-table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
-th, td { padding: 9px 14px; text-align: right; white-space: nowrap; }
-th:nth-child(2), td:nth-child(2) { text-align: left; }
-thead th { padding: 0; border-bottom: 1px solid var(--line); }
-thead button {
-  all: unset; box-sizing: border-box; display: block; width: 100%; padding: 15px 14px 11px; cursor: pointer;
-  font-size: 0.8125rem; font-weight: 700; color: var(--faint); text-align: inherit;
-}
-thead button:hover, thead th[aria-sort] button { color: var(--ink); }
-thead th[aria-sort] button::after { content: ""; display: inline-block; margin-left: 6px; border: 4px solid transparent; border-top: 5px solid var(--accent); border-bottom: 0; vertical-align: 2px; }
-thead th[aria-sort="ascending"] button::after { border-top: 0; border-bottom: 5px solid var(--accent); }
-tbody tr { border-top: 1px solid var(--line); transition: background 0.15s; }
-tbody tr:first-child { border-top: 0; }
-tbody tr:hover { background: var(--inset); }
-td.rank { width: 1%; padding-right: 0; }
-td.chosen { font-weight: 700; }
-td.name a { display: flex; align-items: center; gap: 10px; font-weight: 700; color: inherit; text-decoration: none; }
-@media (min-width: 900px) {
-  .narrow { display: none; }
-  .wide { display: block; }
-}
+/* A member the ledger has counted nothing for yet has time played alone. */
+.tiles.alone { grid-template-columns: 1fr; }
+.tiles.alone .tile { grid-column: auto; }
 
 footer { max-width: 660px; margin: 0 auto; padding: 20px 20px 44px; color: var(--faint); font-size: 0.8125rem; text-align: center; text-wrap: balance; }
 footer p { margin-top: 6px; }

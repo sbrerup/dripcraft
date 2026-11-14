@@ -1,8 +1,8 @@
 <!doctype html>
 <!-- The members' hub (see README). Caddy serves this for every address that is
      not a file, the map or the numbers, and hub.js draws the page the address
-     names. player-stats.sh writes /data/stats.json, /data/skins/ and
-     /data/flags/. Nothing is loaded from other sites: the skins and flags are
+     names. player-stats.sh writes /data/stats.json, feats.json, counted.json,
+     /data/skins/ and /data/flags/. Nothing is loaded from other sites: the skins and flags are
      copies the script fetched, and the icon is written out in this file. -->
 <html lang="en">
 <head>
@@ -26,7 +26,7 @@
   <nav id="nav" aria-label="Pages">
     <a href="/" data-page="home"><i class="spot"></i><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 11.2 12 4l8 7.2V19a1 1 0 0 1-1 1h-4.5v-5.5h-5V20H5a1 1 0 0 1-1-1z"/></svg><span>Home</span></a>
     <a href="/members" data-page="members"><i class="spot"></i><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8.2" r="3.2"/><path d="M3 19.5c0-3.2 2.7-5.3 6-5.3s6 2.1 6 5.3M15.5 5.3a3.2 3.2 0 0 1 0 5.8M17.5 14.7c2.1.7 3.5 2.4 3.5 4.8"/></svg><span>Members</span></a>
-    <a href="/records" data-page="records"><i class="spot"></i><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4h8v5.5a4 4 0 0 1-8 0zM8 6H5v1a3 3 0 0 0 3 3M16 6h3v1a3 3 0 0 1-3 3M12 13.5V17M8.5 20h7M10 17h4"/></svg><span>Records</span></a>
+    <a href="/moments" data-page="moments"><i class="spot"></i><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M11 3.5l1.8 5.2 5.2 1.8-5.2 1.8L11 17.5l-1.8-5.2L4 10.5l5.2-1.8zM18.5 14.5l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"/></svg><span>Moments</span></a>
     <a href="/feats" data-page="feats"><i class="spot"></i><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="9" r="5.2"/><path d="M8.6 13 7 20.5l5-2.6 5 2.6-1.6-7.5"/></svg><span>Feats</span></a>
     <a href="/map/"><i class="spot"></i><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4.5 3.5 6.8v12.7L9 17.2l6 2.3 5.5-2.3V4.5L15 6.8zM9 4.5v12.7M15 6.8v12.7"/></svg><span>Map</span></a>
   </nav>
@@ -35,9 +35,9 @@
 <footer>
   <p>Lush Acres, a little world of our own.</p>
   <p>
-    The numbers are counted by the game itself, since the world's first day. Someone who is playing shows
-    numbers a few minutes old. Feats are worked out from what the server has recorded since
-    6 November 2026. A flag is the country a member last joined from:
+    Time played comes from the game itself, since the world's first day, and is a few minutes
+    old for someone who is playing. The other numbers, the moments and the feats are worked out
+    from what the server has recorded since 6 November 2026. A flag is the country a member last joined from:
     <a href="https://db-ip.com" rel="noopener">IP Geolocation by DB-IP</a>.
   </p>
   <p id="updated"></p>

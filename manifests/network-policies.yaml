@@ -256,6 +256,17 @@ spec:
               app.kubernetes.io/name: minecraft
       ports:
         - {protocol: TCP, port: 8080}
+    # The ledger, in its own namespace, for the feats the members' hub shows.
+    # Its own policy lets this pod in.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: dripcraft-ledger
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: dripcraft-ledger
+      ports:
+        - {protocol: TCP, port: 8080}
     # Let's Encrypt, for the certificate, and the skins, flags and country
     # database for the members' hub: HTTPS only.
     - to:

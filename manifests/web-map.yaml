@@ -136,6 +136,10 @@ spec:
             # The world's folder: LEVEL in minecraft.yaml.
             - name: WORLD
               value: dripcraft
+            # The ledger, which keeps the feats the hub shows (see README). It is
+            # asked from here, so a visitor's browser never reaches it.
+            - name: LEDGER_URL
+              value: http://dripcraft-ledger.dripcraft-ledger.svc.cluster.local
           resources:
             # The node's CPU is almost fully reserved (see creative.yaml).
             requests:

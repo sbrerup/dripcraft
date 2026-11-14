@@ -13,9 +13,12 @@
 # and the database stay in $state, which Caddy does not serve. Only the country
 # reaches the page.
 #
+# And it asks the ledger for the feats members have earned, and writes them beside
+# the numbers.
+#
 # The server's folder is mounted read-only. This must keep running whatever is in
-# it, and whatever Mojang or DB-IP answer. A container that stops makes the pod
-# unready, which takes the web map off the tunnel.
+# it, and whatever Mojang, DB-IP or the ledger answer. A container that stops makes
+# the pod unready, which takes the web map off the tunnel.
 
 server=${SERVER_DIR:-/server}
 world=${WORLD:-dripcraft}
@@ -26,6 +29,10 @@ interval=${INTERVAL:-300}
 fetch=${FETCH:-1}
 skins=$(dirname "$out")/skins
 flags=$(dirname "$out")/flags
+feats=$(dirname "$out")/feats.json
+# Where the ledger answers, without a slash at the end. Empty leaves the feats out.
+ledger=${LEDGER_URL:-}
+ledger=${ledger%/}
 
 # Logs a line only when it differs from the last one, so a problem that lasts is
 # logged once rather than every round.
@@ -149,6 +156,50 @@ update_flag() {
   rm -f "$flags/$code.tmp"
 }
 
+# Asks the ledger which feats there are and who holds them, and writes what the hub
+# shows of that beside the numbers: each member's feats, when each was earned and
+# with whom. The ledger also says where, and that is left out here, so it never
+# reaches the page. The ledger is a separate application (see README), and the hub
+# does without it: when it does not answer, the page keeps the feats it has, and
+# with no address set there are none.
+feats_log=
+update_feats() {
+  [ -n "$ledger" ] || return 0
+  if curl -fsS --max-time 10 --max-filesize 1000000 -o "$state/feats-all.tmp" "$ledger/feats" 2>/dev/null &&
+      curl -fsS --max-time 10 --max-filesize 5000000 -o "$state/feats-held.tmp" "$ledger/feats/earned" 2>/dev/null &&
+      jq -cn --slurpfile all "$state/feats-all.tmp" --slurpfile held "$state/feats-held.tmp" --argjson now "$(date +%s)" '
+        # "2026-11-13T22:53:24+00:00", with or without parts of a second, as seconds.
+        def seconds: sub("\\.[0-9]+"; "") | sub("\\+00:00$"; "Z") | fromdateiso8601;
+        {
+          updated: $now,
+          feats: [$all[0][] | {key, name, earned, repeatable}],
+          members: [
+            $held[0][] | {
+              uuid: .playerId,
+              earned: [
+                .earned[] | {
+                  feat,
+                  at: (.happenedAt | seconds),
+                  with: (.together // []),
+                  number,
+                  day: (if .feat == "day-to-remember" then .occasion else null end)
+                }
+              ]
+            }
+          ]
+        } | select((.feats | length) > 0)' > "$feats.tmp" 2>/dev/null &&
+      [ -s "$feats.tmp" ] && mv "$feats.tmp" "$feats"; then
+    line="The feats are up to date."
+  else
+    line="Could not ask the ledger for the feats, so the page keeps the ones it has."
+  fi
+  rm -f "$feats.tmp" "$state/feats-all.tmp" "$state/feats-held.tmp"
+  # Logged only when it changes, and apart from the line about the numbers, so
+  # the two do not take turns in the log every round.
+  [ "$line" = "$feats_log" ] || echo "$line"
+  feats_log=$line
+}
+
 # Names by UUID, kept from the last round that could read them.
 names='{}'
 
@@ -242,6 +293,7 @@ mkdir -p "$skins" "$flags" "$state" 2>/dev/null
 trap 'kill $! 2>/dev/null; exit 0' TERM INT
 while :; do
   build
+  update_feats
   [ -z "${ONCE:-}" ] || exit 0
   sleep "$interval" &
   wait $!

@@ -448,6 +448,75 @@ const home = (p) => "/members/" + encodeURIComponent(p.name);
 const status = (p) => (playing(p) ? "Playing now" : "Last played " + ago(p.seen));
 const dot = () => make("i", "live");
 
+// The feats, which the ledger keeps and the script fetches (see README): which
+// there are, and what each member holds, by their id. Both stay empty until they
+// have come, and when there are none, and then the hub shows no feats.
+let feats = [];
+let held = new Map();
+const byId = (uuid) => players.find((p) => p.uuid === uuid);
+
+// What a member holds, the newest first, one line for each feat. A feat that can
+// be earned again counts how often, and shows the latest time.
+function holds(p) {
+  const lines = new Map();
+  for (const one of held.get(p.uuid) || []) {
+    const info = feats.find((feat) => feat.key === one.feat);
+    if (!info) continue;
+    const line = lines.get(info.key);
+    if (!line) lines.set(info.key, { info, times: 1, at: one.at, among: one.with || [], number: one.number });
+    else {
+      line.times += 1;
+      if (one.at > line.at) Object.assign(line, { at: one.at, among: one.with || [], number: one.number });
+    }
+  }
+  return [...lines.values()].sort((a, b) => b.at - a.at);
+}
+
+// Everything anyone has earned, the newest first.
+function earnings() {
+  const all = [];
+  for (const p of players) {
+    for (const one of held.get(p.uuid) || []) {
+      const info = feats.find((feat) => feat.key === one.feat);
+      if (info) all.push({ p, info, at: one.at });
+    }
+  }
+  return all.sort((a, b) => b.at - a.at);
+}
+
+// When something was earned: how long ago in the first week, and after that the day.
+function when(seconds) {
+  if (Date.now() / 1000 - seconds < 7 * 86400) return ago(seconds);
+  return new Date(seconds * 1000).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+}
+
+// The picture that stands for feats, as the row of pages has it.
+function medal() {
+  return document.querySelector('#nav a[href="/feats"] svg').cloneNode(true);
+}
+
+// The faces of the members something was earned with, each a way to their page.
+function company(uuids) {
+  const others = uuids.map(byId).filter(Boolean);
+  if (!others.length) return null;
+  const row = make("span", "company", make("small", null, "With"));
+  for (const other of others) {
+    const a = link(home(other), null, figure(other, "head", 28));
+    a.title = other.name;
+    a.setAttribute("aria-label", other.name);
+    row.append(a);
+  }
+  return row;
+}
+
+// The number that goes with a feat, in words, for the feats that have one.
+function told(line) {
+  if (line.number == null) return null;
+  if (line.info.key === "day-to-remember") return "Passed their own best of " + count(line.number) + " blocks in a day";
+  if (line.info.key === "first-million") return "Block number " + count(line.number);
+  return null;
+}
+
 // Each record with the member who holds it, leaving out records nobody has a number for.
 function holders() {
   return RECORDS.map((record) => {
@@ -783,18 +852,63 @@ function homePage() {
   holders().slice(0, 5).forEach((record) => best.append(person(record.best, shown(COLUMNS[record.column], record.best), record.label)));
   const board = make("section", "card", make("h2", null, "On the noticeboard"), best, link("/records", "more", "All the records", arrow()));
 
+  const earned = make("ul", "people");
+  const newest = earnings().slice(0, 5);
+  newest.forEach((one) => earned.append(person(one.p, ago(one.at), one.info.name)));
+  const lately = newest.length
+    ? make("section", "card", make("h2", null, "Lately earned"), earned, link("/feats", "more", "All the feats", arrow()))
+    : null;
+
   const doors = make("div", "doors");
   for (const [href, name, text] of [
     ["/members", "Members", "Everyone who calls the acres home."],
     ["/records", "Records", "Who has been up to what."],
+    feats.length && ["/feats", "Feats", "Earned alone and together."],
     ["/map/", "The map", "See what everyone has built."],
-  ]) {
+  ].filter(Boolean)) {
     const picture = document.querySelector(`#nav a[href="${href}"] svg`).cloneNode(true);
     doors.append(link(href, "card door", picture, make("span", null, make("strong", null, name), make("small", null, text)), arrow()));
   }
 
   const box = new DocumentFragment();
-  box.append(scene("home", 3, words, ...lineup(40)), make("div", "page", staggered(make("div", "two", around, board)), staggered(doors)));
+  box.append(scene("home", 3, words, ...lineup(40)), make("div", "page", staggered(make("div", "two", around, board, lately)), staggered(doors)));
+  return box;
+}
+
+// What one member holds, as panels on their page. Nothing at all when they hold none.
+function featsOf(p) {
+  const lines = holds(p);
+  if (!lines.length) return null;
+  const grid = make("div", "feats");
+  for (const line of lines) {
+    grid.append(make("div", "card feat", medal(), make("span", null,
+      make("strong", null, line.info.name, line.times > 1 && make("span", "chip", line.times + " times")),
+      told(line) && make("em", null, told(line)),
+      company(line.among),
+      make("small", null, when(line.at)))));
+  }
+  return staggered(grid);
+}
+
+// Every feat there is: how it is earned, and who holds it, whoever earned it first in front.
+function featsPage() {
+  if (!feats.length) return quiet("Feats", "No feats to show right now.", link("/", "button", arrow(), "Back to the meadow"));
+  const grid = make("div", "featlist");
+  for (const info of feats) {
+    const who = players
+      .map((p) => ({ p, line: holds(p).find((line) => line.info.key === info.key) }))
+      .filter((one) => one.line)
+      .sort((a, b) => a.line.at - b.line.at);
+    const faces = make("div", "holders");
+    who.forEach((one) => faces.append(link(home(one.p), null, figure(one.p, "head", 28), make("b", null, one.p.name))));
+    grid.append(make("section", "card featcard",
+      make("h3", null, medal(), info.name),
+      make("p", null, info.earned, info.repeatable && " It can be earned again."),
+      who.length ? faces : make("p", "none", "Nobody yet.")));
+  }
+  const words = make("div", "words", make("h1", null, "Feats"), make("p", "tally", "Earned on the acres, alone and together."));
+  const box = new DocumentFragment();
+  box.append(scene("sub", 53, words, acre(3, 75, true)), make("div", "page", staggered(grid)));
   return box;
 }
 
@@ -941,7 +1055,7 @@ function memberPage(p) {
   }
 
   const box = new DocumentFragment();
-  box.append(scene("sub solo", 20 + index, words, acre(3, 80 + index, true, stage)), make("div", "page", staggered(tiles), staggered(lists), beside));
+  box.append(scene("sub solo", 20 + index, words, acre(3, 80 + index, true, stage)), make("div", "page", staggered(tiles), featsOf(p), staggered(lists), beside));
   return box;
 }
 
@@ -1048,6 +1162,7 @@ function route(path) {
     return member ? { page: "members", member } : { page: "lost" };
   }
   if (parts[0] === "records" && parts.length === 1) return { page: "records" };
+  if (parts[0] === "feats" && parts.length === 1) return { page: "feats" };
   return { page: "lost" };
 }
 
@@ -1063,18 +1178,18 @@ function draw(arriving) {
     return;
   }
   current = route(location.pathname);
-  const pages = { home: homePage, members: membersPage, records: recordsPage, lost: lostPage };
+  const pages = { home: homePage, members: membersPage, records: recordsPage, feats: featsPage, lost: lostPage };
   view.replaceChildren(current.member ? memberPage(current.member) : pages[current.page]());
   for (const a of document.querySelectorAll("#nav a")) {
     if (a.dataset.page === current.page) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
   }
-  const names = { home: "", members: "Members", records: "Records", lost: "Nothing here" };
+  const names = { home: "", members: "Members", records: "Records", feats: "Feats", lost: "Nothing here" };
   const name = current.member ? current.member.name : names[current.page];
   document.title = name ? name + " · Lush Acres" : "Lush Acres";
 }
 
 // Where a page is among the others, to tell which way to move between two.
-const place = (where) => ({ home: 0, members: 1, records: 2, lost: 3 })[where.page] + (where.member ? 0.5 : 0);
+const place = (where) => ({ home: 0, members: 1, records: 2, feats: 3, lost: 4 })[where.page] + (where.member ? 0.5 : 0);
 
 // Moves to the page the address now names, with a transition where the browser
 // has them: the sky stays, the page slides the way it lies from the last one,
@@ -1138,11 +1253,27 @@ window.addEventListener("resize", () => {
   if (state === "ready" && current.page === "home" && Math.abs(Math.min(window.innerWidth, 1180) - 24 - fitted) > 40) draw(false);
 });
 
+// The feats come in a file of their own, and the hub does without them: a file
+// that is missing or cannot be read leaves what was loaded before.
+async function loadFeats() {
+  try {
+    const response = await fetch("/data/feats.json", { cache: "no-store" });
+    if (!response.ok) throw new Error(response.status);
+    const data = await response.json();
+    const members = new Map(data.members.map((member) => [member.uuid, member.earned]));
+    feats = data.feats;
+    held = members;
+  } catch (error) {
+    // Nothing to do.
+  }
+}
+
 async function load() {
   try {
     const response = await fetch("/data/stats.json", { cache: "no-store" });
     if (!response.ok) throw new Error(response.status);
     const data = await response.json();
+    await loadFeats();
     // Someone who joined and left at once has a file with no play time in it.
     const found = data.players
       .map((p) => ({ ...p, name: p.name || p.uuid.slice(0, 8), country: /^[A-Z]{2}$/.test(p.country || "") ? p.country : null }))

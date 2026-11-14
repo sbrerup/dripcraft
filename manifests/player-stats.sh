@@ -322,7 +322,6 @@ build() {
   # copy stays, and the next round tries again.
   if ! jq -cn --argjson names "$names" --argjson seen "$seen" --argjson countries "$countries" \
       --argjson models "$models" --argjson now "$(date +%s)" '
-      def short: with_entries(.key |= ltrimstr("minecraft:"));
       {
         updated: $now,
         players: [
@@ -334,12 +333,12 @@ build() {
               seen: $seen[$uuid],
               country: $countries[$names[$uuid] // ""],
               skin: $models[$uuid],
-              stats: (
-                ($file.stats // {} | short) as $stats
-                | ["custom", "mined", "crafted", "used", "broken", "killed", "killed_by"]
-                | map({key: ., value: ($stats[.] // {} | short)})
-                | from_entries
-              )
+              # Of everything the game counts for a player, only the time played
+              # reaches the page. The rest stays in the file on the server: what the
+              # hub shows besides comes from the ledger, and a count such as how
+              # often a member has died is not for everyone to read.
+              # (No apostrophes in here: this program sits in single quotes.)
+              stats: {custom: {play_time: (($file.stats["minecraft:custom"]["minecraft:play_time"] | numbers) // 0)}}
             }
         ]
       }' "$@" > "$out.tmp" 2>/dev/null; then

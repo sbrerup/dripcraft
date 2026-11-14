@@ -896,10 +896,9 @@ It also turns on Paper's anti-xray, which hides ores from players until they are
 next to them, with the Nether's ores added to the hidden list. Ores above Y 64 stay
 visible, which is Paper's default. Honest players do not notice it.
 
-Netherite left on the ground is gone after 30 seconds, where every other item stays
-for 5 minutes. That includes netherite dropped on death. The list is every item whose
-name begins with `netherite_`, and its times are in ticks, 20 to a second. The patch
-sets the whole list, because Paper's own list has cobblestone in it at 15 seconds.
+Netherrack left on the ground is gone after 30 seconds, where every other item stays
+for 5 minutes. The time is in ticks, 20 to a second. The patch sets the whole list,
+because Paper's own list has cobblestone in it at 15 seconds.
 
 Keep `mob-spawn-range` equal to `SIMULATION_DISTANCE`. Both limits apply, so the
 smaller one wins: mobs cannot spawn where the world is not running.

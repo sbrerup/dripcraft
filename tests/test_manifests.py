@@ -3,6 +3,7 @@
 The test that runs player-stats.sh also needs sh and jq, and is skipped without them.
 """
 import gzip
+import http.server
 import importlib.util
 import json
 import os
@@ -265,6 +266,9 @@ class DripcraftPublicTests(unittest.TestCase):
 
     # The player statistics page.
 
+    def web_map_env(self, name):
+        return {e["name"]: e for e in self.web_map_container(name).get("env", [])}
+
     def web_map_container(self, name):
         return next(c for c in self.web_map["containers"] if c["name"] == name)
 
@@ -455,6 +459,113 @@ class DripcraftPublicTests(unittest.TestCase):
             result = run()
             self.assertEqual(result.returncode, 0)
             self.assertIn("keeps its last numbers", result.stdout)
+            self.assertEqual(json.loads(out.read_text()), data)
+
+    def test_hub_asks_the_ledger_from_the_stats_container_and_may_reach_it(self):
+        # The feats come from the ledger, a separate application in its own namespace.
+        # The stats container asks it, so no visitor's browser does, and Caddy does not.
+        address = self.web_map_env("player-stats")["LEDGER_URL"]["value"]
+        self.assertEqual(address, "http://dripcraft-ledger.dripcraft-ledger.svc.cluster.local")
+        self.assertNotIn("LEDGER_URL", self.web_map_env("caddy"))
+        self.assertNotIn("dripcraft-ledger", self.caddyfile)
+        (rule,) = [
+            r for r in self.egress("web-map-egress")
+            if r["to"][0].get("namespaceSelector", {}).get("matchLabels", {}).get("kubernetes.io/metadata.name") == "dripcraft-ledger"
+        ]
+        self.assertEqual(rule["to"], [{
+            "namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "dripcraft-ledger"}},
+            "podSelector": {"matchLabels": {"app.kubernetes.io/name": "dripcraft-ledger"}},
+        }])
+        self.assertEqual(rule["ports"], [{"protocol": "TCP", "port": 8080}])
+        # The page reads the copy the script wrote, like the numbers.
+        script = (ROOT / "manifests" / "hub.js").read_text(encoding="utf-8")
+        self.assertIn('fetch("/data/feats.json"', script)
+
+    @unittest.skipUnless(shutil.which("sh") and shutil.which("jq") and shutil.which("curl"), "needs sh, jq and curl")
+    def test_stats_script_writes_the_feats_without_where_they_were_earned(self):
+        answers = {
+            "/feats": [
+                {"key": "side-by-side", "name": "Side by side", "earned": "You and another member.", "repeatable": False},
+                {"key": "day-to-remember", "name": "A day to remember", "earned": "You passed.", "repeatable": True},
+            ],
+            "/feats/earned": [{
+                "id": "s1", "playerId": "aaaa", "earned": [
+                    {"feat": "side-by-side", "occasion": "dripcraft/-2/0/2026110619", "happenedAt": "2026-11-06T19:57:26+00:00",
+                     "decidedAt": "2026-11-14T03:57:07.1234567+00:00", "together": ["bbbb"], "number": None, "quiet": True},
+                    {"feat": "day-to-remember", "occasion": "2026-11-13", "happenedAt": "2026-11-13T22:53:24.5+00:00",
+                     "decidedAt": "2026-11-14T03:57:07+00:00", "together": [], "number": 3610, "quiet": False},
+                ],
+            }],
+        }
+
+        class Ledger(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                if self.path not in answers:
+                    self.send_error(404)
+                    return
+                body = json.dumps(answers[self.path]).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        ledger = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Ledger)
+        threading.Thread(target=ledger.serve_forever, daemon=True).start()
+        self.addCleanup(ledger.server_close)
+        self.addCleanup(ledger.shutdown)
+        with tempfile.TemporaryDirectory() as folder:
+            server = pathlib.Path(folder)
+            (server / "state").mkdir()
+            (server / "public").mkdir()
+            out = server / "public" / "feats.json"
+
+            def run(address):
+                return subprocess.run(
+                    ["sh", (ROOT / "manifests" / "player-stats.sh").as_posix()],
+                    env={
+                        **os.environ, "ONCE": "1", "FETCH": "0", "SERVER_DIR": server.as_posix(),
+                        "OUT_FILE": (server / "public" / "stats.json").as_posix(), "STATE_DIR": (server / "state").as_posix(),
+                        "LEDGER_URL": address,
+                    },
+                    capture_output=True, text=True, timeout=60,
+                )
+
+            # With no address the feats are left out, and nothing is said about them.
+            result = run("")
+            self.assertEqual(result.returncode, 0)
+            self.assertFalse(out.exists())
+            self.assertNotIn("feats", result.stdout)
+
+            result = run(f"http://127.0.0.1:{ledger.server_address[1]}/")
+            self.assertEqual(result.returncode, 0)
+            self.assertIn("The feats are up to date.", result.stdout)
+            data = json.loads(out.read_text())
+            self.assertEqual([feat["key"] for feat in data["feats"]], ["side-by-side", "day-to-remember"])
+            self.assertEqual(data["members"], [{
+                "uuid": "aaaa",
+                "earned": [
+                    # 2026-11-06 19:57:26 and 2026-11-13 22:53:24 in UTC, as seconds.
+                    {"feat": "side-by-side", "at": 1793995046, "with": ["bbbb"], "number": None, "day": None},
+                    {"feat": "day-to-remember", "at": 1794610404, "with": [], "number": 3610, "day": "2026-11-13"},
+                ],
+            }])
+            # The ledger names the square of the map a feat was earned in. That stays out.
+            self.assertNotIn("dripcraft/", out.read_text())
+            self.assertEqual(sorted(file.name for file in (server / "state").iterdir()), [])
+
+            # When the ledger does not answer, or answers with something else, the page
+            # keeps the feats it has, and the script still ends well.
+            answers["/feats"] = {"status": 500}
+            result = run(f"http://127.0.0.1:{ledger.server_address[1]}")
+            self.assertEqual(result.returncode, 0)
+            self.assertIn("keeps the ones it has", result.stdout)
+            self.assertEqual(json.loads(out.read_text()), data)
+            result = run("http://127.0.0.1:9")
+            self.assertEqual(result.returncode, 0)
             self.assertEqual(json.loads(out.read_text()), data)
 
     def archive_container(self):

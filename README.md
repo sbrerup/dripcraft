@@ -694,16 +694,21 @@ map, anyone who knows the server's address can see it, countries included.
 - **Home** (`/`) has everyone standing together on the meadow, each in their own skin, with
   their name, the flag of the country they last joined from and a green dot while they
   are playing. Someone who is playing waves. Below are who was here last, a few of the
-  records, and doors to the other pages.
+  records, the feats earned lately, and doors to the other pages.
 - **Members** (`/members`) has a card for each member, and `/members/NAME` is a member's
   own page. The member stands at the top, waves when the page opens or when touched, and
   turns when dragged. Below are time played, deaths, mobs killed, blocks mined, distance
   travelled, items crafted and trades with villagers, each with their place among the
-  others, then what they mined, crafted, used and killed most, what killed them, and how
-  they travelled, and at the foot links to the members either side.
+  others, then the feats they hold, then what they mined, crafted, used and killed most,
+  what killed them, and how they travelled, and at the foot links to the members either
+  side.
 - **Records** (`/records`) has the noticeboard of titles, such as Homebody for the most
   time played, and everyone's numbers: on a wide screen a table that sorts by any column,
   and on a phone a ranking by one number at a time.
+- **Feats** (`/feats`) has every feat there is, how it is earned, and the members who hold
+  it, whoever earned it first in front. A feat is something earned by what a member did,
+  alone or with others, such as building in the same spot in the same hour. Nothing is
+  given in the game for one, and none of them ranks members against each other.
 - **Map** goes to the [web map](#web-map) at `/map/`.
 
 Moving between pages keeps the sky where it is while the land changes under it, slides
@@ -754,6 +759,16 @@ from the whitelist and the server's name cache, and Caddy serves that with the h
 Only that container mounts the server's folder, read-only,
 so Caddy never sees it, and changing the hub or the script restarts the proxy and not the
 server.
+
+The feats are not the game's. The ledger works them out from what the [archive](#the-archive)
+has recorded, since 6 November 2026, and keeps them. In the same round the container asks
+the ledger which feats there are and who holds them (`LEDGER_URL` in `web-map.yaml`), and
+writes `/data/feats.json` beside the numbers: each member's feats, when each was earned
+and with whom. The ledger also says in which part of the map, and the script leaves that
+out, so it never reaches the page. Network policy lets the `web-map` pod reach the ledger's
+pod on one port, and the ledger lets in that pod and nothing else, so a visitor's browser
+never reaches the ledger. The hub does without it: when the ledger does not answer, the
+page keeps the feats it has, and a pod that has just started shows none until it does.
 
 The hub loads nothing from other sites, so a visitor's browser tells nobody else what it
 is looking at. The container fetches what it needs and Caddy serves the copies:

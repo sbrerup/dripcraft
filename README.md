@@ -600,6 +600,11 @@ certificate from Let's Encrypt itself and keeps it on its own small volume. The 
 its own pod, so changing it never restarts the server, and the server's map port, 8080,
 takes connections from that pod only.
 
+Caddy sends `X-Robots-Tag: noindex, nofollow` with everything it serves, the hub and the map
+alike, which asks search engines to list none of it. That keeps the site out of search
+results and keeps nobody out of the site. The address itself is still public, because every
+certificate Let's Encrypt issues is published in logs anyone can read.
+
 In the playit dashboard, the tunnel is:
 
 - **Tunnel Type:** HTTPs (needs Premium)

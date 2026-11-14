@@ -376,6 +376,12 @@ class DripcraftPublicTests(unittest.TestCase):
             self.assertTrue(address.startswith("/data/"))
         self.assertNotRegex(script, r"[\"'`]data/")
 
+    def test_search_engines_are_asked_to_list_nothing(self):
+        # One tab in, so it is the site's own and covers the hub, the numbers and the map.
+        self.assertIn('\n\theader X-Robots-Tag "noindex, nofollow"\n', self.caddyfile)
+        # A robots.txt that keeps crawlers out would keep them from seeing the header.
+        self.assertNotIn("robots.txt", self.objects_with_prefix("ConfigMap", "player-stats")["data"])
+
     def test_caddy_never_sees_players_addresses(self):
         # The script keeps addresses and the country database in its state folder.
         script = (ROOT / "manifests" / "player-stats.sh").read_text()

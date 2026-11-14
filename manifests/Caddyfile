@@ -12,6 +12,10 @@
 # The map's address lives in the web-map Secret, not in this public repository.
 # Until the Secret exists, Caddy serves localhost only and asks for no certificate.
 {$MAP_DOMAIN:localhost} {
+	# Asks search engines to list nothing here: the hub, the numbers and the map.
+	# Not a robots.txt, because a crawler that is kept out never sees this.
+	header X-Robots-Tag "noindex, nofollow"
+
 	# The web map, at /map/. squaremap asks for everything by relative address,
 	# so it works under a folder with the folder's name taken off.
 	redir /map /map/

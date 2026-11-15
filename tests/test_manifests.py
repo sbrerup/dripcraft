@@ -95,6 +95,31 @@ class DripcraftPublicTests(unittest.TestCase):
         self.assertIn("chunky continue", env["POST_BACKUP_SCRIPT"]["value"])
         self.assertIn("/tmp/chunky-paused", env["POST_BACKUP_SCRIPT"]["value"])
 
+    def backup_containers(self):
+        return self.container("backup"), self.creative_container("backup")
+
+    def test_both_servers_back_up_the_same_way(self):
+        # One restore procedure in the README covers both.
+        survival, creative = self.env("backup"), self.creative_env("backup")
+        for name in ("BACKUP_METHOD", "DEST_DIR", "SRC_DIR"):
+            self.assertEqual(creative[name]["value"], survival[name]["value"], name)
+        self.assertEqual(survival["BACKUP_METHOD"]["value"], "rsync")
+
+    def test_pruning_backups_cannot_reach_anything_else_on_the_volume(self):
+        # The rsync method prunes every old folder in DEST_DIR, whatever made it, and
+        # the top of the survival volume holds the copy of the test server.
+        for container in self.backup_containers():
+            env = {e["name"]: e for e in container["env"]}
+            mount = next(m["mountPath"] for m in container["volumeMounts"] if m["name"] == "backups")
+            self.assertRegex(env["DEST_DIR"]["value"], rf"^{mount}/[\w-]+$")
+
+    def test_files_that_vanish_mid_copy_stay_out_of_backups(self):
+        # rsync reports the whole backup as failed when a file it listed is gone.
+        for container in self.backup_containers():
+            excludes = next(e for e in container["env"] if e["name"] == "EXCLUDES")["value"].split(",")
+            self.assertIn("*.tmp", excludes)
+            self.assertIn("plugins/spark/tmp", excludes)
+
     def test_chunk_workers_are_set(self):
         config = yaml.safe_load((ROOT / "manifests" / "paper-global.yml").read_text())
         self.assertEqual(config["chunk-system"]["worker-threads"], 4)

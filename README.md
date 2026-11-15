@@ -201,7 +201,7 @@ server's script.
 fully reserved, and firecrawl-api needs one core unreserved to roll out an update. So this
 server runs on whatever is idle, and the survival server wins when both are busy.
 
-Its `backup` sidecar writes an archive every 6 hours and keeps 7 days, on a 10 GiB volume
+Its `backup` sidecar makes a backup every 6 hours and keeps 7 days, on a 10 GiB volume
 beside the 10 GiB data volume. The notes under [Backups](#backups) apply, except that this
 server's files are at the top of its data volume, and its claims are
 `data-minecraft-creative-0` and `backups-minecraft-creative-0`.
@@ -935,35 +935,50 @@ still shared, and exclusive cores would need a change to the node's own configur
 
 ## Backups
 
-The `backup` sidecar writes `/backups/world-*.tar.gz` every 6 hours and keeps 2 days.
-It pauses any running pre-generation while it does, because tar reports a failed backup
-if the world changes underneath it, and resumes only what it paused. Plugin and server
-jars are left out, because the image downloads them again on start, and so are the web
-map's tiles, because a render makes them again. These archives are
-on the same disk as the world, and whether the nightly labmox VM backup covers this
-volume has not been checked.
+Every 6 hours the `backup` sidecar copies the server's folder with rsync to a new folder,
+`/backups/snapshots/world-<date>-<time>`, and it keeps 7 days of them. Each backup is the
+whole server as plain files. A file that has not changed since the backup before is a
+hard link to it, so a backup takes only the space of the files that changed. When this
+was set up, the first one took 30 GiB and the next, twelve minutes later, 0.6 GiB.
+
+World saving is off while the copy runs, so the region files, which hold the world, do
+not change underneath it. In a test on the live world, all 10,102 of them matched the
+copy byte for byte. The server still rewrites `level.dat` and a few small state files
+while saving is off, and plugins write their own files when they like, so those are
+copied as they happen to be. Prism's database is one of them and may not open cleanly
+from a backup, but the [archive](#the-archive) has its records.
+
+The sidecar pauses any running pre-generation while it copies, because Chunky writes to
+the world while it generates, and resumes only what it paused. Plugin and server jars
+are left out, because the image downloads them again on start, and so are the web map's
+tiles, because a render makes them again. Temporary files are left out too, because one
+that vanishes while it is copied fails the backup.
+
+The backups are on the same disk as the world. The nightly labmox VM backup includes
+that disk. Archives from before this method, `world-*.tar.gz` at the top of `/backups`,
+are no longer pruned: delete them by hand once a restore from a folder has been tested.
 
 To restore, do not scale the StatefulSet down, because Argo CD scales it straight back
-up. Instead, unpack the archive into a new folder and point the server at it:
+up. Instead, copy a backup into a new folder and point the server at it:
 
 1. From a temporary pod that mounts the `data-minecraft-0` and `backups-minecraft-0`
-   claims, unpack the archive into a new folder on the data volume, such as
-   `restored-20261106`. The pod must run as uid 1000, so the server can write there.
-   Archives hold the contents of the server's folder, so unpack them inside the new
-   folder rather than over the top of the volume.
+   claims, copy the backup's folder with `cp -a` to a new folder on the data volume,
+   such as `restored-20261106`. The pod must run as uid 1000, so the server can write
+   there. Never move a backup's folder or point the server at it: its files are shared
+   with the backups around it, and the server would change them in all of those.
 2. In a commit, change `subPath: server` to the new folder in all three containers. The
    server restarts into the restored files, and the image downloads the jars that
-   periodic archives leave out.
+   backups leave out.
 3. The old folder stays on the volume until you remove it.
 
-A periodic archive holds no secrets from Git, but it does hold Geyser's tunnel token and
+A backup holds no secrets from Git, but it does hold Geyser's tunnel token and
 Floodgate's key, so treat it as private. This procedure has not been run end to end.
 
 The test server from before launch is kept twice, in case anyone wants it back. Its
 files are still at the top of the data volume, outside the `server` folder, so this
 server never reads them. A full copy, plugin jars included, is in
-`/backups/pre-golive-20261106`. The sidecar prunes only the top level of `/backups`, so
-that subfolder is never deleted automatically. Neither is on a separate disk.
+`/backups/pre-golive-20261106`. The sidecar prunes only inside `/backups/snapshots`, so
+that folder is never deleted automatically. Neither is on a separate disk.
 
 To go back to the test server, revert the commit that started this server.
 

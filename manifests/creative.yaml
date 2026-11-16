@@ -238,8 +238,10 @@ spec:
           env:
             - name: TZ
               value: Europe/Copenhagen
+            # The same method, folder and exclusions as the survival server, so one
+            # restore procedure covers both (see manifests/minecraft.yaml).
             - name: BACKUP_METHOD
-              value: tar
+              value: rsync
             - name: BACKUP_INTERVAL
               value: 6h
             - name: INITIAL_DELAY
@@ -250,9 +252,9 @@ spec:
             - name: SRC_DIR
               value: /data
             - name: DEST_DIR
-              value: /backups
+              value: /backups/snapshots
             - name: EXCLUDES
-              value: "*.jar,cache,logs,libraries,versions"
+              value: "*.jar,*.tmp,cache,logs,libraries,versions,plugins/spark/tmp"
             - name: RCON_HOST
               value: localhost
             - name: RCON_PORT

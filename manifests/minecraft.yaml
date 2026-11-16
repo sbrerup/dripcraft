@@ -253,18 +253,20 @@ spec:
           env:
             - name: TZ
               value: Europe/Copenhagen
+            # Each backup is a folder of plain files. A file that has not changed
+            # since the backup before is a hard link to it, so a backup takes only
+            # the space of the files that changed.
             - name: BACKUP_METHOD
-              value: tar
+              value: rsync
             - name: BACKUP_INTERVAL
               value: 6h
             - name: INITIAL_DELAY
               value: 15m
-            # A pre-generated world makes each archive large, so 2 days of them.
             - name: PRUNE_BACKUPS_DAYS
-              value: "2"
-            # Chunky writes to the world while it generates, which makes tar report
-            # a failed backup. Pause what is running, and resume only that afterwards.
-            # The wait lets chunks it loaded unload and save.
+              value: "7"
+            # Chunky writes to the world while it generates, so a copy made then can
+            # catch a file half written. Pause what is running, and resume only that
+            # afterwards. The wait lets chunks it loaded unload and save.
             - name: PRE_SAVE_ALL_SCRIPT
               value: |
                 rcon-cli chunky progress | grep -o 'minecraft:[a-z_]*' | sort -u > /tmp/chunky-paused || true
@@ -278,11 +280,15 @@ spec:
                 true
             - name: SRC_DIR
               value: /data
+            # A folder of its own, because pruning removes every folder in here that
+            # is older than the days above, whatever made it.
             - name: DEST_DIR
-              value: /backups
-            # The web map's tiles can be rendered again from the world.
+              value: /backups/snapshots
+            # The web map's tiles can be rendered again from the world. A temporary
+            # file that vanishes while it is copied fails the backup, and spark
+            # replaces its own every few minutes.
             - name: EXCLUDES
-              value: "*.jar,cache,logs,libraries,versions,plugins/squaremap/web/tiles"
+              value: "*.jar,*.tmp,cache,logs,libraries,versions,plugins/squaremap/web/tiles,plugins/spark/tmp"
             - name: RCON_HOST
               value: localhost
             - name: RCON_PORT

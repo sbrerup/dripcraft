@@ -1,0 +1,26 @@
+# Mod Detector's settings. Copied to /data/plugins/ModDetectorPlugin/config.yml on every
+# start, so the plugin never runs with its own defaults, which kick anyone with Xaero's
+# maps, Jade or JourneyMap. Here it only records: nothing is blocked, so nobody is
+# kicked and nothing is said in chat (see README, "Client mods").
+mode: blacklist
+kick: false
+kick-message: "<red>You have been kicked for using disallowed client mods:</red><newline><yellow><mods></yellow>"
+log-format: "[ModDetector] Player %player% sent plugin message on channel: %channel%"
+
+# What to block. Keep all four empty: a mod named here is acted on.
+blocked-mods: []
+custom-mods: {}
+mod-actions: {}
+custom-patterns: []
+
+whitelisted-players: []
+whitelist-operators: false
+debug: false
+
+# Write down every channel a client registers, also for mods the plugin has no name for.
+log-all-channels: true
+notify-admins: false
+# Keep each player's sessions in plugins/ModDetectorPlugin/detections.json.
+track-detections: true
+history:
+  max-sessions-per-player: 100

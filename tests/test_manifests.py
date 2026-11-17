@@ -1494,7 +1494,28 @@ class DripcraftPublicTests(unittest.TestCase):
 
     def test_only_approved_plugins_are_installed(self):
         projects = dict(item.split(":") for item in self.env()["MODRINTH_PROJECTS"]["value"].split(","))
-        self.assertEqual({"nbtapi", "prism", "simple-voice-chat", "chestsort-plus", "chunky", "geyser", "timberella", "discordsrv", "squaremap"}, set(projects))
+        self.assertEqual({"nbtapi", "prism", "simple-voice-chat", "chestsort-plus", "chunky", "geyser", "timberella", "discordsrv", "squaremap", "mod-detector-plugin"}, set(projects))
+
+    def test_mod_detector_records_and_never_kicks(self):
+        settings = yaml.safe_load((ROOT / "manifests" / "mod-detector.yml").read_text())
+        self.assertIs(settings["kick"], False)
+        self.assertIs(settings["notify-admins"], False)
+        # In blacklist mode only what is listed is acted on, and nothing is listed.
+        self.assertEqual(settings["mode"], "blacklist")
+        for name in ("blocked-mods", "custom-mods", "mod-actions", "custom-patterns"):
+            self.assertFalse(settings[name], name)
+        self.assertIs(settings["log-all-channels"], True)
+        self.assertIs(settings["track-detections"], True)
+
+    def test_mod_detector_gets_its_settings_before_its_first_start(self):
+        # The plugin's own defaults kick players, so its file has to be in place
+        # before the server starts. The image copies /plugins into /data/plugins.
+        server = next(c for c in self.server["containers"] if c["name"] == "minecraft")
+        mounts = {m["mountPath"]: m for m in server["volumeMounts"]}
+        mount = mounts["/plugins/ModDetectorPlugin/config.yml"]
+        self.assertEqual(mount["subPath"], "mod-detector.yml")
+        self.assertIn("mod-detector.yml", self.objects_with_prefix("ConfigMap", "paper-config")["data"])
+        self.assertNotIn("COPY_PLUGINS_SRC", self.env())
 
     def test_pre_generation_continues_after_a_restart(self):
         patches = json.loads((ROOT / "manifests" / "tuning-patches.json").read_text())["patches"]

@@ -16,6 +16,7 @@ configMapGenerator:
   - paper-global.yml
   - player-permissions.yml
   - tuning-patches.json
+  - mod-detector.yml
 # The creative server's own copies, under the names its pod mounts them by.
 - name: creative-config
   files:

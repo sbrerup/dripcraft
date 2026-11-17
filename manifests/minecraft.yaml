@@ -151,10 +151,10 @@ spec:
               value: "FALSE"
             # Block log with undo, which needs NBT-API, optional voice chat, chest
             # sorting, world pre-generation from the admin panel, Bedrock players
-            # through Geyser and Floodgate, tree felling, Discord chat and the web
-            # map (see README).
+            # through Geyser and Floodgate, tree felling, Discord chat, the web map
+            # and a record of the mods each client announces (see README).
             - name: MODRINTH_PROJECTS
-              value: nbtapi:h7feK39u,prism:K6DsX6Ko,simple-voice-chat:5OqsnSs7,chestsort-plus:Dftgf7Pm,chunky:RBuKjN4k,geyser:KmriR1ju,timberella:ubeGx8M9,discordsrv:ATlquwiT,squaremap:6wmZVQBO
+              value: nbtapi:h7feK39u,prism:K6DsX6Ko,simple-voice-chat:5OqsnSs7,chestsort-plus:Dftgf7Pm,chunky:RBuKjN4k,geyser:KmriR1ju,timberella:ubeGx8M9,discordsrv:ATlquwiT,squaremap:6wmZVQBO,mod-detector-plugin:Ufk73USj
             # ShareCures is built from sharecures/ in this repository (see README).
             # Floodgate for Paper is not on Modrinth. Pinned to one build.
             - name: PLUGINS
@@ -238,6 +238,12 @@ spec:
             - name: paper-config
               mountPath: /patches/tuning-patches.json
               subPath: tuning-patches.json
+              readOnly: true
+            # The image copies /plugins into /data/plugins before the server
+            # starts, so Mod Detector never runs with its own settings.
+            - name: paper-config
+              mountPath: /plugins/ModDetectorPlugin/config.yml
+              subPath: mod-detector.yml
               readOnly: true
             - name: tmp
               mountPath: /tmp

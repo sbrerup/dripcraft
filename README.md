@@ -435,6 +435,32 @@ import urllib.request
 print(urllib.request.urlopen("http://localhost:8080/feed/activities?limit=3").read().decode())'
 ```
 
+## Client mods
+
+Mod Detector records which mods each player's client announces, in
+`plugins/ModDetectorPlugin/detections.json` on the data volume. Players cannot use it and
+are not told about it. An operator asks it in game, or through `rcon-cli` without the
+slash:
+
+- `/md players` lists who is online and the channels their clients registered.
+- `/md info NAME` shows that player's channels now and in earlier sessions, with the
+  mod's name where the plugin knows it.
+- `/md changes NAME` shows what changed between a player's last two sessions.
+- `/md discovered` lists every channel seen so far.
+
+It sees only part of what a client runs. A mod shows up when it opens a channel to the
+server, as minimaps, voice chat and schematic mods do. A mod that never talks to the
+server is invisible, and that includes most cheat clients. A server is never told which
+resource packs a client has loaded. So an empty list does not prove a clean client.
+
+It only records. `manifests/mod-detector.yml` blocks nothing and turns kicking off. Keep
+it that way: the plugin's own defaults kick anyone with Xaero's maps, Jade or JourneyMap.
+The file is mounted under `/plugins`, which the image copies into `/data/plugins` before
+every start, so the plugin never runs with its own settings. A patch in
+`tuning-patches.json` would not do, because it applies only from the second start.
+
+The creative server does not have it.
+
 ## Chest sorting
 
 Chestsort+ lets players sort chests and their own inventory. It is off for each player

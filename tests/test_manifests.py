@@ -1582,9 +1582,16 @@ class DripcraftPublicTests(unittest.TestCase):
             self.assertEqual(creative[name]["value"], survival[name]["value"], name)
         builds = dict(item.split(":") for item in survival["MODRINTH_PROJECTS"]["value"].split(","))
         projects = dict(item.split(":") for item in creative["MODRINTH_PROJECTS"]["value"].split(","))
-        self.assertEqual(set(projects), {"geyser", "discordsrv"})
-        for name, build in projects.items():
-            self.assertEqual(build, builds[name], name)
+        self.assertEqual(set(projects), {"geyser", "discordsrv", "axiom-paper-plugin"})
+        for name in ("geyser", "discordsrv"):
+            self.assertEqual(projects[name], builds[name], name)
+
+    def test_axiom_is_on_the_creative_server_only(self):
+        # An editing tool: it has no place in a survival world. Pinned to one build.
+        survival = dict(item.split(":") for item in self.env()["MODRINTH_PROJECTS"]["value"].split(","))
+        creative = dict(item.split(":") for item in self.creative_env()["MODRINTH_PROJECTS"]["value"].split(","))
+        self.assertNotIn("axiom-paper-plugin", survival)
+        self.assertRegex(creative["axiom-paper-plugin"], r"^[A-Za-z0-9]{8}$")
 
     def test_creative_redstone_behaves_as_it_does_on_survival(self):
         def redstone(patches):

@@ -109,9 +109,9 @@ the two. Players join it at its own address, as a second entry in their server l
 It runs as the `minecraft-creative-0` pod from `manifests/creative.yaml`, with its own
 volumes, whitelist, operators and backups. The world is one layer of grass on dirt and
 bedrock, with no villages and no monsters. It runs the same Paper build as the survival
-server, with Geyser, Floodgate and DiscordSRV only, and the same redstone setting, so a
-contraption behaves the same on both. It has no voice chat, web map, grief log or
-pre-generation.
+server, with Geyser, Floodgate, DiscordSRV and [Axiom](#axiom) only, and the same redstone
+setting, so a contraption behaves the same on both. It has no voice chat, web map, grief
+log or pre-generation.
 
 Run commands on it the same way, with its pod's name:
 
@@ -151,6 +151,40 @@ It answers `Reloaded the whitelist`. If the first command fails, nothing arrives
 server's whitelist is left as it was. In Git Bash on Windows, run
 `export MSYS_NO_PATHCONV=1` first: without it the `/data` path in the first command is
 rewritten to a Windows path, and that command fails.
+
+### Axiom
+
+The server runs the [Axiom Paper Plugin](https://modrinth.com/plugin/axiom-paper-plugin),
+the server side of the [Axiom](https://modrinth.com/mod/axiom) editing mod. It is on this
+server only. A player who wants to use it installs the Axiom mod for Fabric on their own
+client. Everyone else plays as before.
+
+Only operators of this server can use it. Make someone an operator, and have them leave
+and join again:
+
+```bash
+kubectl -n dripcraft-public exec minecraft-creative-0 -c minecraft -- rcon-cli op NAME
+```
+
+An operator can also run every command on this server. To let players use Axiom without
+that, give them the `axiom.default` permission in a permissions file, as
+`manifests/player-permissions.yml` does for the survival server. This is not set up.
+
+If Axiom stays off for someone, they can run `/whynoaxiom` in game to be told why.
+
+On the survival server Axiom does nothing, because that server has no plugin for it. A
+client that has the mod is expected to show up under [Client mods](#client-mods) there.
+This has not been checked.
+
+Axiom's own terms limit multiplayer use. A player gets 30 days the first time they use it
+on a server. After that, a player who uses it for non-commercial builds asks for a
+whitelist in the `#whitelist-request` channel of Axiom's Discord, which lasts 90 days and
+can be renewed. Commercial use needs a paid license. See
+[Axiom's page on the whitelist](https://axiomdocs.moulberry.com/other/whitelist.html).
+
+The plugin's build is for one Minecraft version, so pick a new build when `VERSION`
+changes. Its settings are in `plugins/AxiomPaper/config.yml` on the data volume and are
+left at their defaults.
 
 ### Chat between the two servers
 
@@ -1016,6 +1050,8 @@ at the same time. Minecraft worlds cannot be downgraded.
 
 The creative server uses the same image, Paper build and plugin builds, and the tests
 fail if the two differ, so change both files in one commit. Both servers then restart.
+The creative server's Axiom plugin has a build for each Minecraft version: change it in
+the same commit as `VERSION`.
 
 ## Testing
 

@@ -151,8 +151,10 @@ spec:
             - name: SYNC_CHUNK_WRITES
               value: "FALSE"
             # Bedrock players through Geyser and Floodgate, and Discord chat.
+            # Axiom is on this server only, and only operators can use it (see
+            # README). Its build is for one Minecraft version: change it with VERSION.
             - name: MODRINTH_PROJECTS
-              value: geyser:KmriR1ju,discordsrv:ATlquwiT
+              value: geyser:KmriR1ju,discordsrv:ATlquwiT,axiom-paper-plugin:V2yAy4up
             # ShareCures is built from sharecures/ in this repository (see README).
             # Floodgate for Paper is not on Modrinth. Pinned to one build.
             - name: PLUGINS

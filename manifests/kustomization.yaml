@@ -21,6 +21,7 @@ configMapGenerator:
 - name: creative-config
   files:
   - paper-global.yml=creative-paper-global.yml
+  - player-permissions.yml=creative-player-permissions.yml
   - tuning-patches.json=creative-tuning-patches.json
 - name: discord-status
   files:

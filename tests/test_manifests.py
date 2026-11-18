@@ -1593,6 +1593,22 @@ class DripcraftPublicTests(unittest.TestCase):
         self.assertNotIn("axiom-paper-plugin", survival)
         self.assertRegex(creative["axiom-paper-plugin"], r"^[A-Za-z0-9]{8}$")
 
+    def test_every_creative_player_gets_axiom_and_nothing_else(self):
+        # axiom.default is the plugin's own set for players who are not operators.
+        text = (ROOT / "manifests" / "creative-player-permissions.yml").read_text()
+        grant = yaml.safe_load(text)["creativeacres.player"]
+        self.assertIs(grant["default"], True)
+        self.assertEqual(grant["children"], {"axiom.default": True})
+
+    def test_creative_permissions_file_is_where_bukkit_is_told_to_look(self):
+        ops = {op["$set"]["path"]: op["$set"]["value"] for patch in self.creative_patches for op in patch["ops"]}
+        self.assertEqual(ops["$['settings']['permissions-file']"], "config/player-permissions.yml")
+        mounts = {m["mountPath"]: m for m in self.creative_container()["volumeMounts"]}
+        mount = mounts["/config/player-permissions.yml"]
+        self.assertEqual((mount["name"], mount["subPath"]), ("creative-config", "player-permissions.yml"))
+        data = self.objects_with_prefix("ConfigMap", "creative-config")["data"]
+        self.assertIn("creativeacres.player", data["player-permissions.yml"])
+
     def test_creative_redstone_behaves_as_it_does_on_survival(self):
         def redstone(patches):
             patch = next(p for p in patches if p["file"] == "/data/config/paper-world-defaults.yml")

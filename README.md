@@ -159,16 +159,13 @@ the server side of the [Axiom](https://modrinth.com/mod/axiom) editing mod. It i
 server only. A player who wants to use it installs the Axiom mod for Fabric on their own
 client. Everyone else plays as before.
 
-Only operators of this server can use it. Make someone an operator, and have them leave
-and join again:
-
-```bash
-kubectl -n dripcraft-public exec minecraft-creative-0 -c minecraft -- rcon-cli op NAME
-```
-
-An operator can also run every command on this server. To let players use Axiom without
-that, give them the `axiom.default` permission in a permissions file, as
-`manifests/player-permissions.yml` does for the survival server. This is not set up.
+Every player on this server can use it, without being an operator.
+`manifests/creative-player-permissions.yml` grants `axiom.default` to everyone, as
+`manifests/player-permissions.yml` grants chest sorting on the survival server.
+`axiom.default` is the plugin's own set for players who are not operators. It leaves out
+what the plugin does not recommend handing out: spawning, changing and deleting entities,
+sharing blueprints through the server, and annotations. Only an operator has those, and
+this server has no operators.
 
 If Axiom stays off for someone, they can run `/whynoaxiom` in game to be told why.
 

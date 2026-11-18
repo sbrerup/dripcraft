@@ -12,6 +12,17 @@
       ]
     },
     {
+      "file": "/data/bukkit.yml",
+      "ops": [
+        {
+          "$set": {
+            "path": "$['settings']['permissions-file']",
+            "value": "config/player-permissions.yml"
+          }
+        }
+      ]
+    },
+    {
       "file": "/data/plugins/DiscordSRV/config.yml",
       "ops": [
         {

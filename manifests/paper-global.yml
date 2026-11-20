@@ -5,3 +5,7 @@ proxies:
 # Paper chooses only 2 on this node, shared by players loading terrain and pre-generation.
 chunk-system:
   worker-threads: 4
+# Allows attribute swapping: a hit right after switching weapons still uses the
+# previous weapon's attributes, as in vanilla. Paper blocks it unless this is off.
+unsupported-settings:
+  update-equipment-on-player-actions: false

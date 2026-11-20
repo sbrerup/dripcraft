@@ -124,6 +124,13 @@ class DripcraftPublicTests(unittest.TestCase):
         config = yaml.safe_load((ROOT / "manifests" / "paper-global.yml").read_text())
         self.assertEqual(config["chunk-system"]["worker-threads"], 4)
 
+    def test_attribute_swapping_is_allowed_without_shield_stuns(self):
+        # Swap plugins also turn on skip-vanilla-damage-tick-when-shield-blocked. That one
+        # changes blocking for everyone: a blocked hit gives no invulnerability, mobs
+        # included, so shields wear out faster.
+        config = yaml.safe_load((ROOT / "manifests" / "paper-global.yml").read_text())
+        self.assertEqual(config["unsupported-settings"], {"update-equipment-on-player-actions": False})
+
     def test_tree_felling_wears_axes_fully_and_does_not_replant(self):
         patches = json.loads((ROOT / "manifests" / "tuning-patches.json").read_text())["patches"]
         patch = next(p for p in patches if p["file"] == "/data/plugins/Timberella/config.yml")

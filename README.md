@@ -985,6 +985,14 @@ because Paper's own list has cobblestone in it at 15 seconds.
 Keep `mob-spawn-range` equal to `SIMULATION_DISTANCE`. Both limits apply, so the
 smaller one wins: mobs cannot spawn where the world is not running.
 
+`manifests/paper-global.yml` also allows attribute swapping: a hit made right after
+switching weapons still uses the previous weapon's attributes, as in vanilla. Paper
+blocks it unless `update-equipment-on-player-actions` is off. The option is under
+`unsupported-settings`, which Paper gives no support for and may remove. Players who do
+not use the trick notice nothing. The shield option that swap plugins turn on with it
+stays at its default, because it changes blocking for everyone: a blocked hit gives no
+invulnerability, mobs included, so shields wear out faster.
+
 The server shares its node with other workloads. Its 10 GiB of memory is reserved, and
 it is guaranteed 3.4 of the node's 8 CPU cores, using more when the node is idle. That
 guarantee covers CPU time only. The disk, the home network and the host machine are

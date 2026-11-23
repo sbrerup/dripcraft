@@ -1622,6 +1622,16 @@ class DripcraftPublicTests(unittest.TestCase):
             return next(op["$set"]["value"] for op in patch["ops"] if "redstone-implementation" in op["$set"]["path"])
         self.assertEqual(redstone(self.creative_patches), redstone(self.patches))
 
+    def test_slimes_do_not_spawn_on_their_own_on_the_creative_server(self):
+        # The flat world's ground is far below Y 40, so with monsters on every slime chunk
+        # fills with slimes, in any light. Paper lets them spawn only below these heights,
+        # in slime chunks and in swamps, and nothing is below the world's bottom at Y -64.
+        patch = next(p for p in self.creative_patches if p["file"] == "/data/config/paper-world-defaults.yml")
+        ops = {op["$set"]["path"]: op["$set"]["value"] for op in patch["ops"]}
+        height = "$['entities']['spawning']['slime-spawn-height']"
+        for where in ("slime-chunk", "surface-biome"):
+            self.assertLessEqual(ops[f"{height}['{where}']['maximum']"], -64, where)
+
     def test_creative_discord_bot_is_not_the_survival_bot(self):
         # A server ignores what its own bot posted, so sharing a bot would stop chat
         # from one server reaching the other.

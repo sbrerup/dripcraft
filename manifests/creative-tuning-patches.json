@@ -8,6 +8,18 @@
             "path": "$['misc']['redstone-implementation']",
             "value": "ALTERNATE_CURRENT"
           }
+        },
+        {
+          "$set": {
+            "path": "$['entities']['spawning']['slime-spawn-height']['slime-chunk']['maximum']",
+            "value": -64.0
+          }
+        },
+        {
+          "$set": {
+            "path": "$['entities']['spawning']['slime-spawn-height']['surface-biome']['maximum']",
+            "value": -64.0
+          }
         }
       ]
     },

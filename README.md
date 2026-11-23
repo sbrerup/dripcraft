@@ -113,6 +113,11 @@ server, with Geyser, Floodgate, DiscordSRV and [Axiom](#axiom) only, and the sam
 setting, so a contraption behaves the same on both. It has no voice chat, web map, grief
 log or pre-generation.
 
+Slimes never spawn on their own on this server, whatever the difficulty. On a flat world
+the ground is low enough that every slime chunk would fill with them.
+`manifests/creative-tuning-patches.json` sets the heights they may spawn below to the
+world's bottom. Spawn eggs, `/summon` and spawners still make slimes.
+
 Run commands on it the same way, with its pod's name:
 
 ```bash

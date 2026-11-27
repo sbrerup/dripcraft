@@ -169,8 +169,7 @@ Every player on this server can use it, without being an operator.
 `manifests/player-permissions.yml` grants chest sorting on the survival server.
 `axiom.default` is the plugin's own set for players who are not operators. It leaves out
 what the plugin does not recommend handing out: spawning, changing and deleting entities,
-sharing blueprints through the server, and annotations. Only an operator has those, and
-this server has no operators.
+sharing blueprints through the server, and annotations. Only an operator has those.
 
 If Axiom stays off for someone, they can run `/whynoaxiom` in game to be told why.
 
@@ -187,6 +186,18 @@ can be renewed. Commercial use needs a paid license. See
 The plugin's build is for one Minecraft version, so pick a new build when `VERSION`
 changes. Its settings are in `plugins/AxiomPaper/config.yml` on the data volume and are
 left at their defaults.
+
+### Giving items
+
+Every player on this server can use `/give`, without being an operator, for example
+`/give @s minecraft:player_head`. `manifests/creative-player-permissions.yml` grants two
+permissions for it: `minecraft.command.give` for the command itself, and
+`minecraft.command.selector` for `@s`, `@p` and the other selectors. Without the second
+one a player would have to type a name in place of `@s`.
+
+The selectors work in the commands a player already has and in no others. `/give` takes
+any player as its target, so a player can hand items to someone else as well as to
+themself. On the survival server only an operator can use `/give`.
 
 ### Chat between the two servers
 

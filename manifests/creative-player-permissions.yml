@@ -1,9 +1,13 @@
 # What every player on the creative server gets without being an operator. Copied to
 # /data/config on start, and read through settings.permissions-file, set in
 # creative-tuning-patches.json. axiom.default is the Axiom plugin's own set for players
-# who are not operators (see README, "Axiom").
+# who are not operators (see README, "Axiom"). The two minecraft.command lines are for
+# /give: the command itself, and @s and the other selectors, which it refuses from a
+# player who is not an operator otherwise (see README, "Giving items").
 creativeacres.player:
   description: Permissions for every player
   default: true
   children:
     axiom.default: true
+    minecraft.command.give: true
+    minecraft.command.selector: true

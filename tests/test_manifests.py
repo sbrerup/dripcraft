@@ -1600,12 +1600,17 @@ class DripcraftPublicTests(unittest.TestCase):
         self.assertNotIn("axiom-paper-plugin", survival)
         self.assertRegex(creative["axiom-paper-plugin"], r"^[A-Za-z0-9]{8}$")
 
-    def test_every_creative_player_gets_axiom_and_nothing_else(self):
-        # axiom.default is the plugin's own set for players who are not operators.
+    def test_every_creative_player_gets_axiom_and_give_and_nothing_else(self):
+        # axiom.default is the plugin's own set for players who are not operators. /give
+        # has its own permission, and refuses @s without the one for selectors.
         text = (ROOT / "manifests" / "creative-player-permissions.yml").read_text()
         grant = yaml.safe_load(text)["creativeacres.player"]
         self.assertIs(grant["default"], True)
-        self.assertEqual(grant["children"], {"axiom.default": True})
+        self.assertEqual(grant["children"], {
+            "axiom.default": True,
+            "minecraft.command.give": True,
+            "minecraft.command.selector": True,
+        })
 
     def test_creative_permissions_file_is_where_bukkit_is_told_to_look(self):
         ops = {op["$set"]["path"]: op["$set"]["value"] for patch in self.creative_patches for op in patch["ops"]}
